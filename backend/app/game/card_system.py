@@ -16,18 +16,15 @@ class CardSystem:
     def create_deck(self) -> List[Card]:
         """创建两副扑克牌（108张）"""
         self.deck = []
-        
         # 创建两副牌
         for _ in range(2):
             # 添加普通牌（2-A）
             for suit in Suit:
-                for rank in Rank:
+                for rank in [Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN, Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE]:
                     self.deck.append(Card(suit=suit, rank=rank))
-            
             # 添加大小王
-            self.deck.append(Card(suit=Suit.SPADES, rank=Rank.ACE, is_joker=True))  # 大王
-            self.deck.append(Card(suit=Suit.HEARTS, rank=Rank.ACE, is_joker=True))  # 小王
-        
+            self.deck.append(Card(suit=None, rank=Rank.BIG_JOKER, is_joker=True))  # 大王
+            self.deck.append(Card(suit=None, rank=Rank.SMALL_JOKER, is_joker=True))  # 小王
         return self.deck
     
     def shuffle_deck(self) -> List[Card]:

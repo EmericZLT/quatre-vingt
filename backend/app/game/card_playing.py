@@ -1,7 +1,7 @@
 """
 八十分出牌逻辑系统
 """
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 from enum import Enum
 from app.models.game import Card, Suit, Rank, PlayerPosition
 from app.game.card_system import CardSystem
@@ -9,6 +9,7 @@ from app.game.card_comparison import CardComparison
 from app.game.tractor_logic import TractorLogic
 from app.game.trump_logic import TrumpLogic
 from app.game.slingshot_logic import SlingshotLogic, SlingshotResult
+from app.game.card_sorter import CardSorter
 
 
 class CardType(str, Enum):
@@ -40,6 +41,12 @@ class CardPlayingSystem:
         self.led_card_type: Optional[CardType] = None
         self.led_cards: List[Card] = []  # 领出的牌
         self.all_players_hands: Dict[PlayerPosition, List[Card]] = {}  # 所有玩家的手牌
+        # 计分：仅记录闲家在获胜墩中的分数
+        self.idle_positions: Set[PlayerPosition] = set()
+        self.idle_score: int = 0
+        # 轮转：上一墩赢家作为下一墩应当的领出者
+        self.expected_leader: Optional[PlayerPosition] = None
+        self.bottom_cards: List[Card] = []  # 新增底牌字段
         
         # 初始化子系统
         self.card_comparison = CardComparison(card_system, trump_suit)
@@ -55,6 +62,22 @@ class CardPlayingSystem:
             hands: {PlayerPosition: [Card, ...], ...}
         """
         self.all_players_hands = hands.copy()
+
+    def return_cards_sorted(self, player: PlayerPosition, cards: List[Card]) -> None:
+        """
+        将指定牌按当前排序规则放回到 player 的手牌中（保持有序）。
+        适用于：
+        - 甩牌失败后，将领出尝试的牌归还到手牌
+        - 其它需要归还牌到手牌并保持展示顺序的场景
+        前置：self.all_players_hands[player] 被视为已按当前规则排序
+        """
+        if player not in self.all_players_hands:
+            self.all_players_hands[player] = []
+        sorter = CardSorter(
+            current_level=self.card_system.current_level,
+            trump_suit=self.trump_suit
+        )
+        self.all_players_hands[player] = sorter.insert_many_sorted(self.all_players_hands[player], cards)
     
     def play_card(self, player: PlayerPosition, cards: List[Card], player_hand: List[Card]) -> PlayResult:
         """
@@ -88,6 +111,10 @@ class CardPlayingSystem:
             cards: 出的牌
             player_hand: 玩家手牌
         """
+        # 校验是否由期望的玩家领出（若有设置）
+        if self.expected_leader is not None and player != self.expected_leader:
+            return PlayResult(False, f"应由{self.expected_leader.value}领出本墩")
+
         # 记录领出者
         self.trick_leader = player
         self.led_cards = cards.copy()
@@ -156,6 +183,23 @@ class CardPlayingSystem:
         # 如果一圈出完，判断获胜者
         if len(self.current_trick) == 4:
             winner = self._determine_trick_winner()
+            # 设置下一墩应由赢家领出
+            self.expected_leader = winner
+            # 结算当墩分数：仅当赢家为闲家时累计
+            if winner in self.idle_positions:
+                trick_points = self._calculate_trick_points(self.current_trick)
+                self.idle_score += trick_points
+                # 抠底机制，只发生在最后一墩
+                all_hands_empty = all(len(h) == 0 for h in self.all_players_hands.values())
+                if all_hands_empty and self.bottom_cards:
+                    bottom_score = self._get_bottom_score()
+                    # 使用领出者的牌型判断倍率
+                    led_cards_for_multiplier = self.led_cards if self.led_cards else cards
+                    multiplier = self._get_last_trick_multiplier(led_cards_for_multiplier)
+                    bonus = bottom_score * multiplier
+                    if bonus:
+                        self.idle_score += bonus
+                        print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
             self._reset_trick()
             return PlayResult(True, "跟牌成功", winner)
         
@@ -610,8 +654,32 @@ class CardPlayingSystem:
                 {"player": player.value, "cards": [str(c) for c in cards]}
                 for player, cards in self.current_trick
             ],
-            "trick_count": len(self.current_trick)
+            "trick_count": len(self.current_trick),
+            "idle_score": self.idle_score,
+            "expected_leader": self.expected_leader.value if self.expected_leader else None,
         }
+
+    def set_idle_positions(self, positions: List[PlayerPosition]):
+        """设置闲家位置列表，用于闲家记分"""
+        self.idle_positions = set(positions)
+
+    def get_idle_score(self) -> int:
+        """获取闲家累计分数"""
+        return self.idle_score
+
+    def _calculate_trick_points(self, trick: List[Tuple[PlayerPosition, List[Card]]]) -> int:
+        """统计一墩中的分牌总分（5=5分，10=10分，K=10分）"""
+        points = 0
+        for _, cards in trick:
+            for c in cards:
+                if not c.is_joker:
+                    if c.rank == Rank.FIVE:
+                        points += 5
+                    elif c.rank == Rank.TEN:
+                        points += 10
+                    elif c.rank == Rank.KING:
+                        points += 10
+        return points
     
     def _find_forced_cards_after_failed_slingshot(
         self, 
@@ -704,3 +772,28 @@ class CardPlayingSystem:
                 rank_name = card.rank.value
                 card_strs.append(f"{suit_name}{rank_name}")
         return ", ".join(card_strs)
+
+    def set_bottom_cards(self, cards: List[Card]):
+        """设置底牌列表"""
+        self.bottom_cards = cards.copy() if cards else []
+
+    def _get_bottom_score(self) -> int:
+        """计算底牌分"""
+        return sum(self.card_system.get_card_score(card) for card in self.bottom_cards)
+
+    def _get_last_trick_multiplier(self, cards: List[Card]) -> int:
+        """根据出牌的牌型计算底分倍率：单牌*2，对子*4，连对*8、16...，甩牌取最大"""
+        tractors, pairs, singles = self.slingshot_logic._decompose_slingshot(cards)
+        multipliers = [2] * len(singles)
+        multipliers += [4] * len(pairs)
+        # 连对每多1对×2
+        for t in tractors:
+            # t: 连对长度为2n，n为对数
+            n = len(t) // 2
+            if n >= 2:
+                multipliers.append(2 ** (n + 1)) # n=2时8，n=3时16...
+            else:
+                multipliers.append(4) # 普通一对当对子
+        if multipliers:
+            return max(multipliers)
+        return 2 # 默认视为单牌

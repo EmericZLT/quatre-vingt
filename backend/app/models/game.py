@@ -35,16 +35,24 @@ class Rank(str, Enum):
 
 
 class Card(BaseModel):
-    """Playing card model"""
-    suit: Suit
+    """
+    Playing card model
+    suit: 可为空，JOKER无花色。普通牌为♠/♥/♣/♦。
+    """
+    suit: Optional[Suit] = None  # JOKER无花色
     rank: Rank
     value: int = 0
     is_joker: bool = False
     
     def __str__(self) -> str:
         if self.is_joker:
+            # 用rank来区分大王小王
+            if self.rank == Rank.BIG_JOKER:
+                return "JOKER-A/大王"
+            elif self.rank == Rank.SMALL_JOKER:
+                return "JOKER-B/小王"
             return "JOKER"
-        return f"{self.rank.value}{self.suit.value}"
+        return f"{self.rank.value}{self.suit.value if self.suit else ''}"
 
 
 class PlayerPosition(str, Enum):

@@ -3,9 +3,11 @@
 """
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import random
 from app.models.game import GameRoom, Player, PlayerPosition, GameStatus, Suit, Card
 from app.game.card_system import CardSystem
 from app.game.bidding_system import BiddingSystem
+from app.game.card_sorter import CardSorter
 
 
 class GameState:
@@ -20,11 +22,37 @@ class GameState:
         self.current_player: PlayerPosition = PlayerPosition.NORTH
         self.current_trick: List[Card] = []
         self.trick_leader: Optional[PlayerPosition] = None
-        self.game_phase = "waiting"  # waiting, dealing, bidding, playing, scoring
+        # game_phase 状态说明：
+        # - "waiting": 等待状态（初始状态，或一局结束后）
+        #   * 变化时机：__init__() 初始化时，end_round() 结束时
+        # - "dealing": 发牌阶段
+        #   * 变化时机：start_game() 开始游戏时
+        #   * 变化到 "bidding"：deal_tick() 发完100张牌时
+        # - "bidding": 亮主阶段（发牌完成后，玩家可以亮主/反主）
+        #   * 变化时机：deal_tick() 发完100张牌时
+        #   * 变化到 "playing"：finish_bidding() 结束亮主时
+        # - "playing": 游戏阶段（出牌阶段）
+        #   * 变化时机：finish_bidding() 或 _determine_trump_from_bottom() 完成时
+        #   * 变化到 "waiting"：end_round() 结束一局时
+        # - "scoring": 计分阶段（目前未使用，保留用于未来扩展）
+        self.game_phase = "waiting"
         self.scores = {"north_south": 0, "east_west": 0}
         self.tricks_won = {"north_south": 0, "east_west": 0}
         self.bottom_cards: List[Card] = []  # 底牌，始终8张
         self.dealer_has_bottom = False  # 庄家是否已获得底牌
+        # 发牌流程（逐张、逆时针）：NORTH -> WEST -> SOUTH -> EAST -> ...
+        self.dealing_order: List[PlayerPosition] = [
+            PlayerPosition.NORTH,
+            PlayerPosition.WEST,
+            PlayerPosition.SOUTH,
+            PlayerPosition.EAST,
+        ]
+        self.next_deal_turn_index: int = 0
+        self.dealing_deck: List[Card] = []  # 前100张作为发牌区
+        self.trump_locked: bool = False  # 定主完成后锁定主牌
+        self.dealt_count: int = 0  # 已发出的牌（应至多100）
+        self.bidding_cards: Dict[str, List[Card]] = {}  # 记录每个玩家亮主时打出的牌 {player_id: [cards]}
+        self.is_first_round: bool = True  # 是否为第一局游戏
         
     def start_game(self) -> bool:
         """开始游戏"""
@@ -33,37 +61,45 @@ class GameState:
         
         self.room.status = GameStatus.PLAYING
         self.game_phase = "dealing"
+        self.trump_locked = False
+        self.dealer_has_bottom = False
         
         # 创建并洗牌
-        self.card_system.create_deck()
+        deck = self.card_system.create_deck()
         self.card_system.shuffle_deck()
         
-        # 发牌
-        hands = self.card_system.deal_cards()
+        # 前100张作为发牌区，后8张作为底牌
+        self.dealing_deck = deck[0:100]
+        self.bottom_cards = deck[100:108]
         
-        # 给每个玩家发牌（每人25张）
-        for player in self.room.players:
-            position = player.position.value
-            player.cards = hands[position]
+        # 清空玩家手牌
+        for p in self.room.players:
+            p.cards = []
         
-        # 设置底牌（8张，不属于任何玩家）
-        self.bottom_cards = hands['bottom']
+        # 清空亮主记录
+        self.bidding_cards = {}
         
-        self.game_phase = "bidding"
+        # 发牌顺序：第一局随机选择一名玩家开始，后续局从庄家开始
+        if self.is_first_round:
+            # 第一局：随机选择一名玩家作为发牌起始位置
+            first_dealer = random.choice(self.dealing_order)
+            self._set_dealing_order_from_position(first_dealer)
+        else:
+            # 后续局：从庄家开始
+            self._set_dealing_order_from_dealer()
+        
+        self.dealt_count = 0
         return True
     
     def set_trump_suit(self, suit: Suit) -> bool:
-        """设置主牌花色"""
-        if self.game_phase != "bidding":
+        """直接设置主牌花色（仅用于管理接口）。锁定后不可更改。"""
+        if self.trump_locked:
+            return False
+        if self.game_phase not in ["dealing", "bidding"]:
             return False
         
         self.trump_suit = suit
         self.room.trump_suit = suit
-        
-        # 庄家获得底牌
-        self.give_bottom_to_dealer()
-        
-        self.game_phase = "playing"
         return True
     
     def give_bottom_to_dealer(self) -> bool:
@@ -75,8 +111,12 @@ class GameState:
         if not dealer:
             return False
         
-        # 庄家获得底牌（33张牌）
-        dealer.cards.extend(self.bottom_cards)
+        # 庄家获得底牌（33张牌），保持手牌有序
+        sorter = CardSorter(
+            current_level=self.card_system.current_level,
+            trump_suit=self.trump_suit
+        )
+        dealer.cards = sorter.insert_many_sorted(dealer.cards, self.bottom_cards)
         self.dealer_has_bottom = True
         return True
     
@@ -108,8 +148,8 @@ class GameState:
     
     def make_bid(self, player_id: str, cards: List[Card]) -> Dict[str, Any]:
         """玩家亮主"""
-        if self.game_phase != "bidding":
-            return {"success": False, "message": "当前不是亮主阶段"}
+        if self.game_phase not in ["dealing", "bidding"]:
+            return {"success": False, "message": "当前不可亮主"}
         
         # 检查玩家是否有这些牌
         player = self.get_player_by_id(player_id)
@@ -124,6 +164,12 @@ class GameState:
         result = self.bidding_system.make_bid(player_id, cards)
         
         if result["success"]:
+            # 记录该玩家亮主时打出的牌（备份，用于后续归还）
+            if player_id not in self.bidding_cards:
+                self.bidding_cards[player_id] = []
+            # 创建牌的副本，避免引用问题
+            self.bidding_cards[player_id].extend(cards.copy())
+            
             # 从玩家手中移除亮主的牌
             for card in cards:
                 player.cards.remove(card)
@@ -132,7 +178,10 @@ class GameState:
     
     def finish_bidding(self) -> bool:
         """结束亮主阶段"""
-        if self.game_phase != "bidding":
+        if self.game_phase not in ["bidding"]:
+            return False
+        # 必须发完100张牌后方可结束亮主
+        if not self.is_dealing_complete():
             return False
         
         # 结束亮主
@@ -143,10 +192,28 @@ class GameState:
             self.trump_suit = self.bidding_system.get_trump_suit()
             self.room.trump_suit = self.trump_suit
             
-            # 庄家获得底牌
-            self.give_bottom_to_dealer()
+            # 归还所有参与亮主的玩家的牌（保持手牌有序）
+            sorter = CardSorter(
+                current_level=self.card_system.current_level,
+                trump_suit=self.trump_suit
+            )
+            for player_id, cards_list in self.bidding_cards.items():
+                player = self.get_player_by_id(player_id)
+                if player and cards_list:
+                    player.cards = sorter.insert_many_sorted(player.cards, cards_list)
+            
+            # 清空亮主记录
+            self.bidding_cards = {}
+            
+            # 找到最终亮主玩家，设置庄家
+            winner_player = self.get_player_by_id(final_bid.player_id) if final_bid else None
+            if winner_player:
+                self.dealer_position = winner_player.position
+            
+            # 注意：庄家获得底牌的逻辑已解耦，需要单独调用 give_bottom_to_dealer()
             
             self.game_phase = "playing"
+            self.trump_locked = True
             return True
         else:
             # 无人亮主，翻底牌确定主牌
@@ -162,16 +229,64 @@ class GameState:
             if not card.is_joker:
                 self.trump_suit = card.suit
                 self.room.trump_suit = self.trump_suit
-                self.give_bottom_to_dealer()
+                # 注意：庄家获得底牌的逻辑已解耦，需要单独调用 give_bottom_to_dealer()
                 self.game_phase = "playing"
+                self.trump_locked = True
                 return True
         
         # 如果底牌全是王牌，设为无主
         self.trump_suit = None
         self.room.trump_suit = None
-        self.give_bottom_to_dealer()
+        # 注意：庄家获得底牌的逻辑已解耦，需要单独调用 give_bottom_to_dealer()
         self.game_phase = "playing"
+        self.trump_locked = True
         return True
+
+    def deal_tick(self) -> Dict[str, Any]:
+        """发一张牌（逆时针下一位玩家），用于0.2s调用一次。发完100张后自动进入bidding阶段。"""
+        if self.game_phase != "dealing":
+            return {"success": False, "message": "当前不在发牌阶段"}
+        # 若已达100张，切换阶段（兜底）
+        if self.dealt_count >= 100:
+            self.game_phase = "bidding"
+            return {"success": True, "done": True, "message": "发牌已完成，进入亮主阶段"}
+        
+        # 取下一张牌
+        card = self.dealing_deck.pop(0)
+        # 发给下一位
+        pos = self.dealing_order[self.next_deal_turn_index]
+        player = self.get_player_by_position(pos)
+        if not player:
+            return {"success": False, "message": "目标玩家不存在"}
+        # 增量插入到已排序手牌，保持摸牌过程中手牌有序
+        sorter = CardSorter(
+            current_level=self.card_system.current_level,
+            trump_suit=self.trump_suit
+        )
+        player.cards = sorter.insert_sorted(player.cards, card)
+        self.dealt_count += 1
+        
+        # 更新下一个顺位
+        self.next_deal_turn_index = (self.next_deal_turn_index + 1) % len(self.dealing_order)
+        
+        # 如果本次发完了（空）
+        done = False
+        if self.dealt_count >= 100 or not self.dealing_deck:
+            self.game_phase = "bidding"
+            done = True
+        
+        return {
+            "success": True,
+            "done": done,
+            "player": pos.value,
+            "card": str(card),
+            "players_cards_count": {p.position.value: len(p.cards) for p in self.room.players},
+            "dealt_count": self.dealt_count,
+        }
+
+    def is_dealing_complete(self) -> bool:
+        """是否已发完100张（每人25张）"""
+        return self.dealt_count >= 100
     
     def get_bidding_status(self) -> Dict[str, Any]:
         """获取亮主状态"""
@@ -233,10 +348,127 @@ class GameState:
                 return player
         return None
     
+    def get_sorted_cards(self, player_id: str) -> List[Card]:
+        """
+        获取玩家的排序后手牌（用于前端展示）
+        
+        Args:
+            player_id: 玩家ID
+            
+        Returns:
+            排序后的手牌列表
+        """
+        player = self.get_player_by_id(player_id)
+        if not player:
+            return []
+        
+        sorter = CardSorter(
+            current_level=self.card_system.current_level,
+            trump_suit=self.trump_suit
+        )
+        
+        return sorter.sort_cards(player.cards)
+    
     def calculate_scores(self) -> Dict[str, int]:
         """计算得分"""
         # 简化版本：返回当前得分
         return self.scores.copy()
+    
+    def calculate_next_dealer(self, idle_score: int) -> PlayerPosition:
+        """
+        根据本局闲家得分计算下一局的庄家位置
+        
+        Args:
+            idle_score: 本局闲家得分
+            
+        Returns:
+            下一局的庄家位置
+        """
+        current_dealer = self.dealer_position
+        
+        if idle_score < 80:
+            # 闲家得分未达到80分：庄家变为对家
+            # North <-> South, East <-> West
+            partner_map = {
+                PlayerPosition.NORTH: PlayerPosition.SOUTH,
+                PlayerPosition.SOUTH: PlayerPosition.NORTH,
+                PlayerPosition.EAST: PlayerPosition.WEST,
+                PlayerPosition.WEST: PlayerPosition.EAST,
+            }
+            return partner_map[current_dealer]
+        else:
+            # 闲家得分达到80分：庄家变为下家（逆时针）
+            # North -> West -> South -> East -> North
+            next_dealer_map = {
+                PlayerPosition.NORTH: PlayerPosition.WEST,
+                PlayerPosition.WEST: PlayerPosition.SOUTH,
+                PlayerPosition.SOUTH: PlayerPosition.EAST,
+                PlayerPosition.EAST: PlayerPosition.NORTH,
+            }
+            return next_dealer_map[current_dealer]
+    
+    def end_round(self, idle_score: int) -> bool:
+        """
+        结束一局游戏，计算下一局的庄家
+        
+        Args:
+            idle_score: 本局闲家得分
+            
+        Returns:
+            是否成功结束
+        """
+        if self.game_phase != "playing":
+            return False
+        
+        # 计算下一局的庄家
+        next_dealer = self.calculate_next_dealer(idle_score)
+        self.dealer_position = next_dealer
+        
+        # 标记不再是第一局
+        self.is_first_round = False
+        
+        # 重置游戏状态
+        self.game_phase = "waiting"
+        self.trump_locked = False
+        self.dealer_has_bottom = False
+        self.current_trick = []
+        self.trick_leader = None
+        self.bidding_cards = {}
+        
+        return True
+    
+    def _set_dealing_order_from_dealer(self):
+        """
+        根据当前庄家位置设置发牌顺序（从庄家开始，逆时针）
+        """
+        dealer_index = self.dealing_order.index(self.dealer_position)
+        
+        # 重新排列发牌顺序：从庄家开始
+        self.dealing_order = (
+            self.dealing_order[dealer_index:] +
+            self.dealing_order[:dealer_index]
+        )
+        
+        # 设置下一个发牌索引为0（即庄家）
+        self.next_deal_turn_index = 0
+    
+    def _set_dealing_order_from_position(self, position: PlayerPosition):
+        """
+        根据指定位置设置发牌顺序（从该位置开始，逆时针）
+        
+        Args:
+            position: 发牌起始位置
+        """
+        position_index = self.dealing_order.index(position)
+        
+        # 重新排列发牌顺序：从指定位置开始
+        self.dealing_order = (
+            self.dealing_order[position_index:] +
+            self.dealing_order[:position_index]
+        )
+        
+        # 设置下一个发牌索引为0（即指定位置）
+        self.next_deal_turn_index = 0
     
     def can_play_card(self, player_id: str, card: Card) -> bool:
         """检查玩家是否可以出这张牌"""
@@ -268,6 +500,8 @@ class GameState:
             "dealer_position": self.dealer_position.value,
             "dealer_has_bottom": self.dealer_has_bottom,
             "bottom_cards_count": len(self.bottom_cards),
+            "dealing_left": (100 - self.dealt_count) if self.game_phase == "dealing" else 0,
+            "trump_locked": self.trump_locked,
             "players": [
                 {
                     "id": player.id,
