@@ -1,0 +1,91 @@
+import { defineStore } from 'pinia'
+import { createWsClient } from '@/services/ws'
+import { useGameStore } from '@/stores/game'
+
+type Msg = { type?: string; [k: string]: any }
+
+export const useWsStore = defineStore('ws', {
+  state: () => ({
+    url: (import.meta.env.VITE_WS_URL as string) || 'ws://127.0.0.1:8000/ws/game/demo',
+    connected: false,
+    log: [] as string[],
+    client: null as null | { send: (d: unknown) => void; close: () => void },
+    listeners: [] as Array<(msg: Msg) => void>,
+  }),
+  actions: {
+    connect(customUrl?: string) {
+      const url = customUrl || this.url
+      if (!url) {
+        this._push('WS URL 未配置')
+        return
+      }
+      this.disconnect()
+      const client = createWsClient({
+        url,
+        onOpen: () => { this.connected = true; this._push('WS 连接成功') },
+        onClose: () => { this.connected = false; this._push('WS 连接关闭') },
+        onMessage: (ev) => {
+          try {
+            const data = JSON.parse(ev.data) as Msg
+            const msgStr = JSON.stringify(data).slice(0, 150)
+            this._push(`<- ${data.type || 'message'}${msgStr.length < 100 ? ': ' + msgStr : ''}`)
+            this._dispatch(data)
+          } catch {
+            this._push(`<raw> ${String(ev.data).slice(0,200)}`)
+          }
+        },
+      })
+      this.client = client
+    },
+    disconnect() {
+      if (this.client) {
+        this.client.close()
+        this.client = null
+      }
+    },
+    send(data: unknown) {
+      if (!this.client) return
+      this.client.send(data)
+      this._push(`-> ${JSON.stringify(data).slice(0,200)}`)
+    },
+    on(handler: (msg: Msg) => void) { this.listeners.push(handler) },
+    off(handler: (msg: Msg) => void) { this.listeners = this.listeners.filter(h => h !== handler) },
+    _dispatch(msg: Msg) {
+      // 分发到 GameStore（内置集成）
+      const game = useGameStore()
+      switch (msg.type) {
+        case 'state_snapshot':
+          game.applySnapshot(msg)
+          break
+        case 'deal_tick':
+          game.applyDealTick(msg)
+          break
+        case 'phase_changed':
+          game.applyPhaseChanged(msg)
+          break
+        case 'score_updated':
+          game.applyScoreUpdated(msg)
+          break
+        case 'koudi_applied':
+          game.applyKoudiApplied(msg)
+          break
+        case 'play_card':
+          game.applyPlayCard(msg)
+          break
+        case 'trick_won':
+          game.applyTrickWon(msg)
+          break
+        case 'error':
+          // 错误消息已经在日志中显示，这里可以额外处理
+          break
+      }
+      // 通知外部监听者
+      for (const h of this.listeners) {
+        try { h(msg) } catch {}
+      }
+    },
+    _push(s: string) { this.log.unshift(`${new Date().toLocaleTimeString()} ${s}`); if (this.log.length > 200) this.log.pop() }
+  }
+})
+
+

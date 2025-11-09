@@ -3,9 +3,16 @@ Game API endpoints
 """
 from fastapi import APIRouter, HTTPException
 from typing import List
+from pydantic import BaseModel
 from app.models.game import GameRoom, Player, PlayerPosition
 
 router = APIRouter()
+
+class CreateRoomRequest(BaseModel):
+    name: str
+
+class JoinRoomRequest(BaseModel):
+    player_name: str
 
 # In-memory storage for demo (will be replaced with database)
 rooms: dict[str, GameRoom] = {}
@@ -16,11 +23,11 @@ async def get_rooms() -> List[GameRoom]:
     return list(rooms.values())
 
 @router.post("/rooms")
-async def create_room(name: str) -> GameRoom:
+async def create_room(request: CreateRoomRequest) -> GameRoom:
     """Create a new game room"""
     import uuid
     room_id = str(uuid.uuid4())
-    room = GameRoom(id=room_id, name=name)
+    room = GameRoom(id=room_id, name=request.name)
     rooms[room_id] = room
     return room
 
@@ -32,7 +39,7 @@ async def get_room(room_id: str) -> GameRoom:
     return rooms[room_id]
 
 @router.post("/rooms/{room_id}/join")
-async def join_room(room_id: str, player_name: str) -> GameRoom:
+async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
     """Join a game room"""
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -40,6 +47,11 @@ async def join_room(room_id: str, player_name: str) -> GameRoom:
     room = rooms[room_id]
     if room.is_full:
         raise HTTPException(status_code=400, detail="Room is full")
+    
+    # 检查玩家是否已经在房间中
+    existing_player = next((p for p in room.players if p.name == request.player_name), None)
+    if existing_player:
+        return room
     
     # Assign position based on current players
     positions = [PlayerPosition.NORTH, PlayerPosition.SOUTH, PlayerPosition.EAST, PlayerPosition.WEST]
@@ -52,7 +64,7 @@ async def join_room(room_id: str, player_name: str) -> GameRoom:
     import uuid
     player = Player(
         id=str(uuid.uuid4()),
-        name=player_name,
+        name=request.player_name,
         position=available_positions[0]
     )
     
