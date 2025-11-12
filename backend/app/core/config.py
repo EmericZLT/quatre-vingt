@@ -27,7 +27,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     
     # CORS
-    allowed_origins: list = ["http://localhost:3000", "http://localhost:5173"]
+    allowed_origins: list = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
     
     # Game settings
     max_players_per_room: int = 4

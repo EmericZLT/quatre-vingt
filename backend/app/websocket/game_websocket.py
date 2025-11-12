@@ -22,6 +22,17 @@ class ConnectionManager:
         # 存储每个房间的GameState实例
         self.game_states: Dict[str, GameState] = {}
     
+    def get_connection_info(self, room_id: str, websocket: WebSocket) -> Optional[ConnectionInfo]:
+        """根据websocket获取连接信息"""
+        for conn in self.active_connections.get(room_id, []):
+            if conn.websocket == websocket:
+                return conn
+        return None
+
+    def get_player_id_by_connection(self, room_id: str, websocket: WebSocket) -> Optional[str]:
+        conn = self.get_connection_info(room_id, websocket)
+        return conn.player_id if conn else None
+    
     async def connect(self, websocket: WebSocket, room_id: str, player_id: str):
         """
         连接WebSocket
@@ -31,22 +42,52 @@ class ConnectionManager:
             room_id: 房间ID
             player_id: 玩家ID（必须已在房间中）
         """
-        # 验证房间和玩家
-        if room_id not in rooms:
-            await websocket.close(code=1008, reason="Room not found")
-            return
-        
-        room = rooms[room_id]
-        # 验证玩家是否在房间中
-        player = None
-        for p in room.players:
-            if p.id == player_id:
-                player = p
-                break
-        
-        if not player:
-            await websocket.close(code=1008, reason="Player not in room")
-            return
+        # 处理缺少 player_id 的兼容情况（仅允许 demo 房间）
+        if not player_id:
+            if room_id != "demo":
+                await websocket.close(code=1008, reason="player_id required")
+                return
+            # demo 房间用于调试演示
+            if room_id not in rooms:
+                from app.models.game import GameRoom, Player, PlayerPosition
+                import uuid
+                test_room = GameRoom(id=room_id, name=f"测试房间-{room_id}")
+                for pos in [PlayerPosition.NORTH, PlayerPosition.WEST, PlayerPosition.SOUTH, PlayerPosition.EAST]:
+                    player = Player(
+                        id=str(uuid.uuid4()),
+                        name=f"测试玩家-{pos.value}",
+                        position=pos,
+                        is_ready=True
+                    )
+                    test_room.players.append(player)
+                test_room.owner_id = test_room.players[0].id
+                rooms[room_id] = test_room
+            room = rooms[room_id]
+            # 使用第一个玩家作为默认连接的玩家
+            if room.players:
+                player_id = room.players[0].id
+            else:
+                from app.models.game import Player, PlayerPosition
+                import uuid
+                player = Player(
+                    id=str(uuid.uuid4()),
+                    name="测试玩家",
+                    position=PlayerPosition.NORTH,
+                    is_ready=True
+                )
+                room.players.append(player)
+                room.owner_id = player.id
+                player_id = player.id
+        else:
+            if room_id not in rooms:
+                await websocket.close(code=1008, reason="Room not found")
+                return
+            room = rooms[room_id]
+            # 验证玩家是否在房间中
+            player = next((p for p in room.players if p.id == player_id), None)
+            if not player:
+                await websocket.close(code=1008, reason="Player not in room")
+                return
         
         await websocket.accept()
         
@@ -136,6 +177,9 @@ class ConnectionManager:
         snapshot = {
             "type": "state_snapshot",
             "room_id": room_id,
+            "room_name": gs.room.name if gs and gs.room else None,
+            "owner_id": gs.room.owner_id if gs and gs.room else None,
+            "current_level": gs.card_system.current_level if gs and gs.card_system else None,
             "phase": gs.game_phase,
             "dealer_position": gs.dealer_position.value if gs.dealer_position else None,
             "trump_suit": gs.trump_suit.value if gs.trump_suit else None,
@@ -152,8 +196,20 @@ class ConnectionManager:
             "bottom_cards_count": len(gs.bottom_cards),
             "scores": gs.scores,
             "tricks_won": gs.tricks_won,
-            "my_hand": my_hand  # 只有自己的手牌
+            "my_hand": my_hand,  # 只有自己的手牌
+            "players_cards_count": {
+                p.position.value: len(p.cards) for p in gs.room.players
+            },
+            "bidding_cards": {
+                p_id: [str(card) for card in cards]
+                for p_id, cards in getattr(gs, "bidding_cards", {}).items()
+            } if hasattr(gs, "bidding_cards") else {}
         }
+        # 亮主状态（若存在）
+        try:
+            snapshot["bidding"] = gs.get_bidding_status()
+        except Exception:
+            pass
         
         if player_id:
             # 只发送给特定玩家
@@ -174,6 +230,9 @@ class ConnectionManager:
                         sorted_cards = sorter.sort_cards(player.cards)
                         personal_hand = [str(card) for card in sorted_cards]
                         personal_snapshot = snapshot.copy()
+                        personal_snapshot["players_cards_count"] = {
+                            pos.position.value: len(pos.cards) for pos in gs.room.players
+                        }
                         personal_snapshot["my_hand"] = personal_hand
                         try:
                             await conn.websocket.send_text(json.dumps(personal_snapshot))
@@ -216,7 +275,8 @@ class ConnectionManager:
                     "player": result.get("player"),
                     "card": result.get("card"),
                     "dealt_count": result.get("dealt_count"),
-                    "sorted_hand": sorted_cards  # 该玩家的排序后完整手牌
+                    "sorted_hand": sorted_cards,  # 该玩家的排序后完整手牌
+                    "players_cards_count": result.get("players_cards_count"),
                 }
                 await self.send_to_player(json.dumps(event_with_hand), room_id, player.id)
             
@@ -226,7 +286,8 @@ class ConnectionManager:
                 "player": result.get("player"),
                 "card": None,  # 不显示具体牌
                 "dealt_count": result.get("dealt_count"),
-                "sorted_hand": None  # 不显示手牌
+                "sorted_hand": None,  # 不显示手牌
+                "players_cards_count": result.get("players_cards_count"),
             }
             if player:
                 await self.broadcast_to_room(json.dumps(event_public), room_id, exclude_player_id=player.id)
@@ -297,6 +358,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
             player_id = player.id
     
     await manager.connect(websocket, room_id, player_id)
+    # 如果由于校验失败未被接受，则直接结束协程，避免未accept时读取导致异常
+    if manager.get_connection_info(room_id, websocket) is None:
+        return
     try:
         while True:
             data = await websocket.receive_text()
@@ -304,6 +368,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
             
             # Handle different message types
             msg_type = message.get("type")
+            conn_info = manager.get_connection_info(room_id, websocket)
+            player_id_current = conn_info.player_id if conn_info else None
+            room = rooms.get(room_id)
             
             if msg_type == "ping":
                 await manager.send_personal_message(
@@ -319,6 +386,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                         "message": "GameState not found for room"
                     }
                     await manager.broadcast_to_room(json.dumps(error_msg), room_id)
+                elif not room:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "Room not found"}), websocket)
+                elif not player_id_current or (room.owner_id and player_id_current != room.owner_id):
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "只有房主可以开始游戏"}), websocket)
+                elif not room.can_start:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "需要4名玩家才能开始游戏"}), websocket)
                 elif gs.start_game():
                     await manager.send_snapshot(room_id)
                     phase_event = {
@@ -334,18 +407,96 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     await manager.broadcast_to_room(json.dumps(error_msg), room_id)
             elif msg_type == "deal_tick":
                 # 发一张牌
-                await manager.handle_deal_tick(room_id)
+                if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "只有房主可以发牌"}), websocket)
+                else:
+                    await manager.handle_deal_tick(room_id)
+            elif msg_type == "make_bid":
+                # 亮主/反主
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "不可亮主"}), websocket)
+                else:
+                    # 将前端的字符串牌转换为Card
+                    from app.models.game import Card, Rank, Suit
+                    cards_str = message.get("cards") or []
+                    parsed_cards = []
+                    for s in cards_str:
+                        try:
+                            if "JOKER-A" in s:
+                                parsed_cards.append(Card(rank=Rank.BIG_JOKER, is_joker=True))
+                            elif "JOKER-B" in s:
+                                parsed_cards.append(Card(rank=Rank.SMALL_JOKER, is_joker=True))
+                            else:
+                                # 形如 "10♥" "A♣"
+                                suit_char = s[-1]
+                                rank_str = s[:-1]
+                                suit_map = {"♠": Suit.SPADES, "♥": Suit.HEARTS, "♣": Suit.CLUBS, "♦": Suit.DIAMONDS}
+                                suit = suit_map.get(suit_char)
+                                rank = Rank(rank_str)
+                                parsed_cards.append(Card(rank=rank, suit=suit))
+                        except Exception:
+                            continue
+                    result = gs.make_bid(player_id_current, parsed_cards)
+                    bid_payload = {
+                        "type": "bidding_updated",
+                        "result": result,
+                        "bidding": gs.get_bidding_status(),
+                        "bidding_cards": {
+                            p_id: [str(card) for card in cards]
+                            for p_id, cards in getattr(gs, "bidding_cards", {}).items()
+                        } if hasattr(gs, "bidding_cards") else {},
+                        "turn_player_id": gs.bidding_turn_player_id
+                    }
+                    await manager.broadcast_to_room(json.dumps(bid_payload), room_id)
+                    # 若已经决定了主牌，发snapshot
+                    await manager.send_snapshot(room_id)
+            elif msg_type == "pass_bid":
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "不可亮主"}), websocket)
+                else:
+                    result = gs.pass_bid(player_id_current)
+                    if result.get("success"):
+                        payload = {
+                            "type": "bidding_updated",
+                            "result": result,
+                            "bidding": gs.get_bidding_status(),
+                            "bidding_cards": {
+                                p_id: [str(card) for card in cards]
+                                for p_id, cards in getattr(gs, "bidding_cards", {}).items()
+                            } if hasattr(gs, "bidding_cards") else {},
+                            "turn_player_id": gs.bidding_turn_player_id
+                        }
+                        await manager.broadcast_to_room(json.dumps(payload), room_id)
+                        if result.get("finished"):
+                            await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": gs.game_phase}), room_id)
+                        await manager.send_snapshot(room_id)
+                    else:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "不可亮主")}), websocket)
+            elif msg_type == "finish_bidding":
+                gs = manager.get_game_state(room_id)
+                if not gs:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "不可结束亮主"}), websocket)
+                else:
+                    ok = gs.finish_bidding()
+                    if ok:
+                        await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": gs.game_phase}), room_id)
+                    await manager.send_snapshot(room_id)
             elif msg_type == "auto_deal":
                 # 自动发牌（用于演示）
-                # 创建后台任务，不阻塞主循环
-                import asyncio
-                async def auto_deal_task():
-                    gs = manager.get_game_state(room_id)
-                    if gs:
-                        while gs.dealt_count < 100 and gs.game_phase == "dealing":
-                            await manager.handle_deal_tick(room_id)
-                            await asyncio.sleep(0.2)
-                asyncio.create_task(auto_deal_task())
+                if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "只有房主可以自动发牌"}), websocket)
+                else:
+                    # 创建后台任务，不阻塞主循环
+                    import asyncio
+                    async def auto_deal_task():
+                        gs = manager.get_game_state(room_id)
+                        if gs:
+                            while gs.dealt_count < 100 and gs.game_phase == "dealing":
+                                await manager.handle_deal_tick(room_id)
+                                await asyncio.sleep(0.2)
+                    asyncio.create_task(auto_deal_task())
             else:
                 # 其他消息类型可以后续扩展
                 await manager.send_personal_message(

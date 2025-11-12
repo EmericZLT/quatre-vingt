@@ -34,6 +34,14 @@
       <!-- 房间列表 -->
       <div class="bg-slate-800 rounded-lg p-6">
         <h2 class="text-xl font-semibold text-white mb-4">房间列表</h2>
+        <div v-if="canResume" class="mb-4">
+          <button
+            class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
+            @click="resumeRoom"
+          >
+            恢复上次对局
+          </button>
+        </div>
         <div v-if="loading" class="text-center text-slate-400 py-8">加载中...</div>
         <div v-else-if="rooms.length === 0" class="text-center text-slate-400 py-8">暂无房间</div>
         <div v-else class="space-y-3">
@@ -96,6 +104,7 @@ const joinPlayerNames = ref<Record<string, string>>({})
 const joining = ref<Record<string, boolean>>({})
 
 const rooms = ref<any[]>([])
+const canResume = ref(false)
 
 // 加载房间列表
 async function loadRooms() {
@@ -109,6 +118,33 @@ async function loadRooms() {
     console.error('Failed to load rooms:', error)
   } finally {
     loading.value = false
+  }
+}
+
+// 恢复对局
+async function resumeRoom() {
+  if (!roomStore.roomId || !roomStore.token) return
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/rooms/${roomStore.roomId}/reconnect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: roomStore.token })
+    })
+    if (response.ok) {
+      const room = await response.json()
+      const me = (room.players || []).find((p: any) => p.token === roomStore.token)
+      if (me) {
+        roomStore.setRoom(room.id, me.id, me.name, me.position, room.owner_id, room.name, me.token)
+        router.push(`/game/${room.id}`)
+        return
+      }
+    }
+    // 如果失败，清理上下文
+    console.warn('[Resume] token invalid, clearing context')
+    roomStore.clearRoom()
+    canResume.value = false
+  } catch (e) {
+    console.error('Failed to resume room:', e)
   }
 }
 
@@ -157,8 +193,8 @@ async function joinRoom(roomId: string, name?: string) {
       // 找到刚加入的玩家
       const player = room.players.find((p: any) => p.name === playerNameToUse)
       if (player) {
-        // 保存房间和玩家信息
-        roomStore.setRoom(room.id, player.id, player.name, player.position)
+        // 保存房间和玩家信息（含token）
+        roomStore.setRoom(room.id, player.id, player.name, player.position, room.owner_id, room.name, player.token)
         // 跳转到游戏界面
         router.push(`/game/${room.id}`)
       }
@@ -178,6 +214,9 @@ async function joinRoom(roomId: string, name?: string) {
 let refreshInterval: number | null = null
 
 onMounted(() => {
+  // 尝试从本地恢复上下文
+  roomStore.loadFromStorage()
+  canResume.value = !!roomStore.roomId && !!roomStore.token
   loadRooms()
   // 每3秒刷新一次房间列表
   refreshInterval = window.setInterval(loadRooms, 3000)

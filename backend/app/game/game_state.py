@@ -53,6 +53,8 @@ class GameState:
         self.dealt_count: int = 0  # 已发出的牌（应至多100）
         self.bidding_cards: Dict[str, List[Card]] = {}  # 记录每个玩家亮主时打出的牌 {player_id: [cards]}
         self.is_first_round: bool = True  # 是否为第一局游戏
+        self.bidding_turn_player_id: Optional[str] = None
+        self._bidding_queue: List[str] = []
         
     def start_game(self) -> bool:
         """开始游戏"""
@@ -63,6 +65,8 @@ class GameState:
         self.game_phase = "dealing"
         self.trump_locked = False
         self.dealer_has_bottom = False
+        self.bidding_turn_player_id = None
+        self._bidding_queue = []
         
         # 创建并洗牌
         deck = self.card_system.create_deck()
@@ -173,9 +177,39 @@ class GameState:
             # 从玩家手中移除亮主的牌
             for card in cards:
                 player.cards.remove(card)
+
+            # 设置反主顺序（从该玩家的下家开始）
+            self._prepare_bidding_turn(player)
         
         return result
-    
+
+    def pass_bid(self, player_id: str) -> Dict[str, Any]:
+        """玩家选择不反主"""
+        if self.game_phase not in ["dealing", "bidding"]:
+            return {"success": False, "message": "当前不可亮主"}
+        if player_id != self.bidding_turn_player_id:
+            return {"success": False, "message": "未轮到该玩家"}
+
+        # 移除当前玩家
+        if self._bidding_queue and self._bidding_queue[0] == player_id:
+            self._bidding_queue.pop(0)
+
+        # 设置下一个玩家
+        if self._bidding_queue:
+            self.bidding_turn_player_id = self._bidding_queue[0]
+            finished = False
+        else:
+            self.bidding_turn_player_id = None
+            finished = False
+            if self.is_dealing_complete() and self.bidding_system.current_bid:
+                finished = self.finish_bidding()
+
+        return {
+            "success": True,
+            "next_player": self.bidding_turn_player_id,
+            "finished": finished
+        }
+
     def finish_bidding(self) -> bool:
         """结束亮主阶段"""
         if self.game_phase not in ["bidding"]:
@@ -204,6 +238,8 @@ class GameState:
             
             # 清空亮主记录
             self.bidding_cards = {}
+            self._bidding_queue = []
+            self.bidding_turn_player_id = None
             
             # 找到最终亮主玩家，设置庄家
             winner_player = self.get_player_by_id(final_bid.player_id) if final_bid else None
@@ -274,7 +310,12 @@ class GameState:
         if self.dealt_count >= 100 or not self.dealing_deck:
             self.game_phase = "bidding"
             done = True
-        
+            # 若已有亮主，确保轮到下家继续反主
+            if self.bidding_system.current_bid and not self.bidding_turn_player_id:
+                winner = self.get_player_by_id(self.bidding_system.current_bid.player_id)
+                if winner:
+                    self._prepare_bidding_turn(winner)
+
         return {
             "success": True,
             "done": done,
@@ -290,7 +331,9 @@ class GameState:
     
     def get_bidding_status(self) -> Dict[str, Any]:
         """获取亮主状态"""
-        return self.bidding_system.get_bidding_status()
+        status = self.bidding_system.get_bidding_status()
+        status["turn_player_id"] = self.bidding_turn_player_id
+        return status
     
     def play_card(self, player_id: str, card: Card) -> bool:
         """玩家出牌"""
@@ -520,5 +563,32 @@ class GameState:
         # 添加亮主状态
         if self.game_phase == "bidding":
             status["bidding"] = self.get_bidding_status()
+        if hasattr(self, "bidding_cards"):
+            status["bidding_cards"] = {
+                p_id: [str(card) for card in cards]
+                for p_id, cards in self.bidding_cards.items()
+            }
+        status["turn_player_id"] = self.bidding_turn_player_id
         
         return status
+
+    def _prepare_bidding_turn(self, acting_player: Player) -> None:
+        """根据出价玩家设置反主顺序（从其下家开始）"""
+        player_ids = self._players_in_order()
+        if acting_player.id not in player_ids:
+            self._bidding_queue = []
+            self.bidding_turn_player_id = None
+            return
+        idx = player_ids.index(acting_player.id)
+        queue = player_ids[idx + 1 :] + player_ids[:idx]
+        queue = [pid for pid in queue if pid != acting_player.id]
+        self._bidding_queue = queue
+        self.bidding_turn_player_id = self._bidding_queue[0] if self._bidding_queue else None
+
+    def _players_in_order(self) -> List[str]:
+        result: List[str] = []
+        for pos in self.dealing_order:
+            player = self.get_player_by_position(pos)
+            if player:
+                result.append(player.id)
+        return result

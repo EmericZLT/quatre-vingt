@@ -14,13 +14,16 @@ class CreateRoomRequest(BaseModel):
 class JoinRoomRequest(BaseModel):
     player_name: str
 
+class ReconnectRequest(BaseModel):
+    token: str
+
 # In-memory storage for demo (will be replaced with database)
 rooms: dict[str, GameRoom] = {}
 
 @router.get("/rooms")
 async def get_rooms() -> List[GameRoom]:
     """Get all game rooms"""
-    return list(rooms.values())
+    return [room for room in rooms.values() if room.id != "demo"]
 
 @router.post("/rooms")
 async def create_room(request: CreateRoomRequest) -> GameRoom:
@@ -45,13 +48,14 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
         raise HTTPException(status_code=404, detail="Room not found")
     
     room = rooms[room_id]
-    if room.is_full:
-        raise HTTPException(status_code=400, detail="Room is full")
     
     # 检查玩家是否已经在房间中
     existing_player = next((p for p in room.players if p.name == request.player_name), None)
     if existing_player:
         return room
+    
+    if room.is_full:
+        raise HTTPException(status_code=400, detail="Room is full")
     
     # Assign position based on current players
     positions = [PlayerPosition.NORTH, PlayerPosition.SOUTH, PlayerPosition.EAST, PlayerPosition.WEST]
@@ -67,6 +71,25 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
         name=request.player_name,
         position=available_positions[0]
     )
+    # 默认准备就绪
+    player.is_ready = True
+    # 生成用于重连的token
+    player.token = str(uuid.uuid4())
     
     room.players.append(player)
+    # 如果是第一个玩家，设为房主
+    if room.owner_id is None:
+        room.owner_id = player.id
+
+    return room
+
+@router.post("/rooms/{room_id}/reconnect")
+async def reconnect(room_id: str, request: ReconnectRequest) -> GameRoom:
+    """Reconnect to a room using token"""
+    if room_id not in rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    room = rooms[room_id]
+    player = next((p for p in room.players if p.token == request.token), None)
+    if not player:
+        raise HTTPException(status_code=401, detail="Invalid token")
     return room

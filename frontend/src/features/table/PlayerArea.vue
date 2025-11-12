@@ -3,33 +3,47 @@
     <!-- 玩家信息 -->
     <div class="player-info mb-2">
       <div class="text-sm font-semibold text-white text-center">
-        {{ position === 'NORTH' ? '北' : position === 'SOUTH' ? '南' : position === 'EAST' ? '东' : '西' }}家
+        {{ displayName || (position === 'NORTH' ? '北' : position === 'SOUTH' ? '南' : position === 'EAST' ? '东' : '西') + '家' }}
       </div>
       <div class="text-xs text-amber-200 text-center">{{ cardsCount }} 张</div>
     </div>
 
-    <!-- 手牌区域（堆叠显示） -->
-    <div 
-      class="hand-area relative" 
-      :class="getHandAreaClass()"
-      :style="getHandAreaStyle()"
-    >
-      <div 
-        v-for="(card, index) in cards" 
-        :key="index"
-        class="card-stack-item"
-        :style="getCardStyle(index)"
+    <div class="hand-wrapper relative">
+      <!-- 亮主牌展示 -->
+      <div
+        v-if="biddingCards.length"
+        class="bidding-overlay"
+        :class="biddingPlacementClass"
       >
-        <img 
-          :src="getCardImage(card)" 
-          :alt="card"
-          class="card-image"
-          @error="handleImageError"
-        />
+        <div
+          v-for="(card, idx) in biddingCards"
+          :key="`bid-${idx}-${card}`"
+          class="bidding-card"
+        >
+          <img :src="getCardImage(card)" :alt="card" />
+        </div>
       </div>
-      <!-- 空状态提示 -->
-      <div v-if="cards.length === 0" class="empty-hand text-xs text-amber-200/50 text-center py-4">
-        暂无手牌
+
+      <!-- 手牌区域（堆叠显示） -->
+      <div 
+        class="hand-area relative" 
+        :class="getHandAreaClass()"
+        :style="getHandAreaStyle()"
+      >
+        <div 
+          v-for="(card, index) in renderCards" 
+          :key="`seat-${position}-idx-${index}`"
+          class="card-stack-item"
+          :style="getCardStyle(index)"
+        >
+          <img 
+            :src="getCardImage(card)" 
+            :alt="card"
+            class="card-image"
+            decoding="async"
+            @error="handleImageError"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -44,14 +58,41 @@ interface Props {
   cards: string[]
   cardsCount: number
   isCurrentPlayer?: boolean
+  displayName?: string
+  biddingCards?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  isCurrentPlayer: false
+  isCurrentPlayer: false,
+  displayName: '',
+  biddingCards: () => []
+})
+
+const biddingPlacementClass = computed(() => {
+  switch (props.position) {
+    case 'NORTH':
+      return 'bidding-bottom'
+    case 'SOUTH':
+      return 'bidding-top'
+    case 'WEST':
+      return 'bidding-right'
+    case 'EAST':
+      return 'bidding-left'
+    default:
+      return 'bidding-bottom'
+  }
+})
+
+// 渲染列表：若无具体手牌且有数量，则显示背面占位
+const renderCards = computed<string[]>(() => {
+  if (props.cards && props.cards.length > 0) return props.cards
+  if (props.cardsCount > 0) return Array(props.cardsCount).fill('__BACK__')
+  return []
 })
 
 // 获取卡牌图片
 function getCardImage(cardStr: string): string {
+  if (cardStr === '__BACK__') return '/assets/cards/Background.png'
   const img = getCardImageFromString(cardStr)
   return img || '/assets/cards/Background.png' // 默认背景图
 }
@@ -125,38 +166,34 @@ function getCardStyle(index: number): Record<string, string> {
   // 根据位置确定堆叠方向
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
     // 横向堆叠（左右方向）：后面的卡向右偏移，覆盖前面卡的右侧75%，露出左侧25%
-    // 计算居中：第一张卡的左边缘应该在 50% - 总宽度/2
-    // 每张卡的left = 50% - 总宽度/2 + index * offsetStep
-    const totalWidth = handTotalSize.value
-    const halfWidth = totalWidth / 2 // 总宽度的一半
-    const cardOffset = index * offsetStep // 每张卡的偏移
+    const offset = index * offsetStep
     
-    // 第一张卡的左边缘在 50% - halfWidth
-    // 每张卡的left = 50% - halfWidth + cardOffset
+    // 计算居中偏移：让整个手牌区域居中
+    const totalWidth = handTotalSize.value
+    const centerOffset = totalWidth / 2
+    
     return {
-      left: `calc(50% - ${halfWidth}px + ${cardOffset}px)`,
+      left: `calc(50% - ${centerOffset}px + ${offset}px)`,
       top: '50%',
       zIndex: `${index + 1}`, // 后面的卡在上层
       transform: 'translateY(-50%)'
     }
   } else {
     // 纵向堆叠（上下方向）：后面的卡向下偏移，覆盖前面卡的下侧75%，露出上侧25%
-    // 计算居中：第一张卡的上边缘应该在 50% - 总高度/2
-    // 每张卡的top = 50% - 总高度/2 + index * offsetStep
-    const totalHeight = handTotalSize.value
-    const halfHeight = totalHeight / 2 // 总高度的一半
-    const cardOffset = index * offsetStep // 每张卡的偏移
+    const offset = index * offsetStep
     
-    // 第一张卡的上边缘在 50% - halfHeight
-    // 每张卡的top = 50% - halfHeight + cardOffset
+    const totalHeight = handTotalSize.value
+    const centerOffset = totalHeight / 2
+    
     return {
-      top: `calc(50% - ${halfHeight}px + ${cardOffset}px)`,
+      top: `calc(50% - ${centerOffset}px + ${offset}px)`,
       left: '50%',
       zIndex: `${index + 1}`, // 后面的卡在上层
       transform: 'translateX(-50%)'
     }
   }
 }
+
 </script>
 
 <style scoped>
@@ -167,7 +204,61 @@ function getCardStyle(index: number): Record<string, string> {
   overflow: visible;
 }
 
-/* 当前玩家区域样式 - 后续可以添加高亮边框等 */
+.player-info {
+  min-height: 36px;
+}
+
+.hand-wrapper {
+  position: relative;
+}
+
+.bidding-overlay {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.bidding-overlay.bidding-top {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bidding-overlay.bidding-bottom {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bidding-overlay.bidding-left {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+}
+
+.bidding-overlay.bidding-right {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+}
+
+.bidding-card {
+  width: 42px;
+  height: 58px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid rgba(250, 204, 21, 0.7);
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.bidding-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
 .hand-area {
   position: relative;
@@ -201,10 +292,13 @@ function getCardStyle(index: number): Record<string, string> {
   position: absolute;
   width: 60px;
   height: 84px;
+  /* 只显示左上25%区域 */
+  overflow: hidden;
   border-radius: 4px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   transition: all 0.2s ease;
   cursor: pointer;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .card-stack-item:hover {
@@ -219,6 +313,10 @@ function getCardStyle(index: number): Record<string, string> {
   object-fit: cover;
   border-radius: 4px;
   display: block;
+  /* 降低闪烁：启用合成层与背面不可见 */
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .empty-hand {

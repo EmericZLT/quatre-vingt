@@ -6,7 +6,7 @@ type Msg = { type?: string; [k: string]: any }
 
 export const useWsStore = defineStore('ws', {
   state: () => ({
-    url: (import.meta.env.VITE_WS_URL as string) || 'ws://127.0.0.1:8000/ws/game/demo',
+    url: (import.meta.env.VITE_WS_URL as string) || '',
     connected: false,
     log: [] as string[],
     client: null as null | { send: (d: unknown) => void; close: () => void },

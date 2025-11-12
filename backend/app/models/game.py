@@ -71,6 +71,7 @@ class Player(BaseModel):
     cards: List[Card] = []
     is_ready: bool = False
     score: int = 0
+    token: Optional[str] = None
 
 
 class GameStatus(str, Enum):
@@ -90,6 +91,7 @@ class GameRoom(BaseModel):
     dealer_position: PlayerPosition = PlayerPosition.NORTH
     trump_suit: Optional[Suit] = None
     created_at: datetime = datetime.now()
+    owner_id: Optional[str] = None
     
     @property
     def is_full(self) -> bool:

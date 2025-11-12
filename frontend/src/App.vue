@@ -4,10 +4,30 @@
       <header class="flex items-center justify-between py-2">
         <h1 class="text-xl font-semibold">八十分 | Quatre-Vingt</h1>
         <nav class="space-x-4 text-slate-300">
-          <RouterLink to="/">桌面</RouterLink>
-          <RouterLink to="/dealing">发牌演示</RouterLink>
-          <RouterLink to="/rooms">房间列表</RouterLink>
-          <RouterLink to="/game">牌局界面</RouterLink>
+          <RouterLink
+            v-if="hasActiveRoom"
+            :to="`/game/${roomStore.roomId}`"
+          >
+            牌局界面
+          </RouterLink>
+          <RouterLink
+            v-else
+            to="/rooms"
+          >
+            房间列表
+          </RouterLink>
+          <RouterLink
+            v-if="isDev"
+            to="/"
+          >
+            桌面
+          </RouterLink>
+          <RouterLink
+            v-if="isDev"
+            to="/dealing"
+          >
+            发牌演示
+          </RouterLink>
         </nav>
       </header>
       <main class="py-4">
@@ -18,7 +38,14 @@
   
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoomStore } from '@/stores/room'
+
+const roomStore = useRoomStore()
+const hasActiveRoom = computed(() => !!roomStore.roomId)
+const isDev = import.meta.env.MODE === 'development'
+</script>
 
 <style scoped>
 a.router-link-active {
