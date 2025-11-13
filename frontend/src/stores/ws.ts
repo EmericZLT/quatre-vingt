@@ -75,6 +75,18 @@ export const useWsStore = defineStore('ws', {
         case 'trick_won':
           game.applyTrickWon(msg)
           break
+        case 'bottom_updated':
+          game.applyBottomUpdate(msg)
+          if (Array.isArray(msg.bottom_cards)) {
+            game.applySnapshotBottomCards(msg.bottom_cards)
+          }
+          break
+        case 'card_played':
+          game.applyCardPlayed(msg)
+          break
+        case 'trick_complete':
+          game.applyTrickComplete(msg)
+          break
         case 'error':
           // 错误消息已经在日志中显示，这里可以额外处理
           break

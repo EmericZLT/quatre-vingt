@@ -228,10 +228,14 @@ class CardPlayingSystem:
         
         # 4. 检查出的牌是否符合花色要求
         if same_suit_cards:
-            # 有该花色，检查出的牌是否都是该花色
-            for card in cards:
-                if self.slingshot_logic._get_card_suit(card) != led_suit_str:
-                    return PlayResult(False, "有该花色必须出该花色")
+            # 有该花色，检查出的牌中该花色的数量
+            same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+            # 如果出的该花色牌数量少于手牌中该花色的数量，说明没有出完该花色
+            if len(same_suit_in_cards) < len(same_suit_cards):
+                # 检查是否有该花色的牌没有出
+                for card in cards:
+                    if self.slingshot_logic._get_card_suit(card) != led_suit_str:
+                        return PlayResult(False, "有该花色必须出该花色")
         
         # 5. 检查牌型匹配
         if self.led_card_type == CardType.PAIR:
@@ -269,18 +273,39 @@ class CardPlayingSystem:
         """
         检查拖拉机跟牌规则
         
+        优先级：拖拉机 > 对子 > 单张 > 其他花色
+        
         Args:
             cards: 跟的牌
             player_hand: 玩家手牌
             led_suit_str: 领出的花色类型
         """
+        # 获取该花色的牌
+        same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        
         # 检查是否出了拖拉机
-        if not self.tractor_logic.is_tractor(cards):
+        is_tractor = self.tractor_logic.is_tractor(cards)
+        is_same_suit_tractor = self.tractor_logic.is_tractor(same_suit_in_cards) if same_suit_in_cards else False
+        
+        if not is_tractor or not is_same_suit_tractor:
             # 检查手中是否有该花色的拖拉机
-            same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
-            
             if self.tractor_logic.is_tractor(same_suit_cards):
                 return PlayResult(False, "有该花色拖拉机必须出拖拉机")
+            
+            # 如果没有拖拉机，检查是否有对子（优先出对子）
+            # 只有当该花色的牌没有出完时，才需要检查对子
+            if same_suit_cards and len(same_suit_in_cards) < len(same_suit_cards):
+                from collections import Counter
+                rank_counts = Counter([c.rank for c in same_suit_cards])
+                has_pair = any(count >= 2 for count in rank_counts.values())
+                
+                if has_pair:
+                    # 检查是否出了对子
+                    follow_rank_counts = Counter([c.rank for c in same_suit_in_cards])
+                    pairs_in_follow = sum(1 for count in follow_rank_counts.values() if count >= 2)
+                    if pairs_in_follow == 0:
+                        return PlayResult(False, "有该花色对子必须出对子")
         
         return PlayResult(True, "拖拉机跟牌规则检查通过")
     
@@ -305,32 +330,41 @@ class CardPlayingSystem:
         pair_count_in_led = led_card_types.count("pair")
         tractor_count_in_led = led_card_types.count("tractor")
         
-        # 获取同花色的牌
+        # 获取同花色的牌（出牌前的手牌）
         same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        # 获取跟的牌中该花色的牌
+        same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
         
         # 检查跟的牌是否符合要求
         if same_suit_cards:
-            # 3. 检查对子匹配
-            if pair_count_in_led > 0:
-                # 领出有对子，检查手中是否有对子
-                from collections import Counter
-                same_suit_rank_counts = Counter([c.rank for c in same_suit_cards])
-                pairs_in_hand = sum(1 for count in same_suit_rank_counts.values() if count >= 2)
+            # 如果出的该花色牌数量少于手牌中该花色的数量，说明还有该花色的牌没有出
+            if len(same_suit_in_cards) < len(same_suit_cards):
+                # 检查是否出了其他花色的牌（不允许）
+                other_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) != led_suit_str]
+                if other_suit_in_cards:
+                    return PlayResult(False, "有该花色必须出该花色")
                 
-                if pairs_in_hand > 0:
-                    # 手中有对子，检查是否出了对子
-                    follow_rank_counts = Counter([c.rank for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str])
-                    pairs_in_follow = sum(1 for count in follow_rank_counts.values() if count >= 2)
+                # 3. 检查对子匹配
+                if pair_count_in_led > 0:
+                    # 领出有对子，检查手中是否有对子
+                    from collections import Counter
+                    same_suit_rank_counts = Counter([c.rank for c in same_suit_cards])
+                    pairs_in_hand = sum(1 for count in same_suit_rank_counts.values() if count >= 2)
                     
-                    if pairs_in_follow < min(pairs_in_hand, pair_count_in_led):
-                        return PlayResult(False, "有该花色对子必须出对子")
-            
-            # 4. 检查拖拉机匹配
-            if tractor_count_in_led > 0:
-                # 领出有拖拉机，检查手中是否有拖拉机
-                if self.tractor_logic.is_tractor(same_suit_cards):
-                    if not self.tractor_logic.is_tractor([c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]):
-                        return PlayResult(False, "有该花色拖拉机必须出拖拉机")
+                    if pairs_in_hand > 0:
+                        # 手中有对子，检查是否出了对子
+                        follow_rank_counts = Counter([c.rank for c in same_suit_in_cards])
+                        pairs_in_follow = sum(1 for count in follow_rank_counts.values() if count >= 2)
+                        
+                        if pairs_in_follow < min(pairs_in_hand, pair_count_in_led):
+                            return PlayResult(False, "有该花色对子必须出对子")
+                
+                # 4. 检查拖拉机匹配
+                if tractor_count_in_led > 0:
+                    # 领出有拖拉机，检查手中是否有拖拉机
+                    if self.tractor_logic.is_tractor(same_suit_cards):
+                        if not self.tractor_logic.is_tractor(same_suit_in_cards):
+                            return PlayResult(False, "有该花色拖拉机必须出拖拉机")
         
         return PlayResult(True, "甩牌跟牌规则检查通过")
     

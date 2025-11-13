@@ -1,11 +1,20 @@
 <template>
-  <div class="player-area" :class="{ 'current-player': isCurrentPlayer }">
-    <!-- 玩家信息 -->
-    <div class="player-info mb-2">
-      <div class="text-sm font-semibold text-white text-center">
+  <div class="player-area" :class="{ 
+    'current-player': isCurrentPlayer,
+    'opponent-player': !isCurrentPlayer && position === 'NORTH'
+  }">
+    <!-- 玩家信息：当前玩家和对家显示在左侧，左右玩家显示在上方 -->
+    <div 
+      class="player-info" 
+      :class="{ 
+        'player-info-left': isCurrentPlayer || position === 'NORTH', 
+        'player-info-top': !isCurrentPlayer && position !== 'NORTH' 
+      }"
+    >
+      <div class="text-sm font-semibold text-white" :class="(isCurrentPlayer || position === 'NORTH') ? 'text-left' : 'text-center'">
         {{ displayName || (position === 'NORTH' ? '北' : position === 'SOUTH' ? '南' : position === 'EAST' ? '东' : '西') + '家' }}
       </div>
-      <div class="text-xs text-amber-200 text-center">{{ cardsCount }} 张</div>
+      <div class="text-xs text-amber-200" :class="(isCurrentPlayer || position === 'NORTH') ? 'text-left' : 'text-center'">{{ cardsCount }} 张</div>
     </div>
 
     <div class="hand-wrapper relative">
@@ -24,6 +33,23 @@
         </div>
       </div>
 
+      <!-- 当前轮次出牌展示（堆叠显示） -->
+      <div
+        v-if="playedCards.length"
+        class="played-cards-overlay"
+        :class="playedCardsPlacementClass"
+        :style="getPlayedCardsContainerStyle()"
+      >
+        <div
+          v-for="(card, idx) in playedCards"
+          :key="`played-${idx}-${card}`"
+          class="played-card"
+          :style="getPlayedCardStyle(idx)"
+        >
+          <img :src="getCardImage(card)" :alt="card" />
+        </div>
+      </div>
+
       <!-- 手牌区域（堆叠显示） -->
       <div 
         class="hand-area relative" 
@@ -34,7 +60,15 @@
           v-for="(card, index) in renderCards" 
           :key="`seat-${position}-idx-${index}`"
           class="card-stack-item"
+          :class="{
+            selectable: props.selectable && card !== '__BACK__',
+            selected: isSelected(index),
+            hovered: hoveredIndex === index && props.selectable && card !== '__BACK__'
+          }"
           :style="getCardStyle(index)"
+          @click="handleCardClick(index, card)"
+          @mouseenter="handleMouseEnter(index, card)"
+          @mouseleave="handleMouseLeave"
         >
           <img 
             :src="getCardImage(card)" 
@@ -50,8 +84,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { getCardImageFromString } from '@/utils/cards'
+import { throttle, debounce } from '@/utils/throttle'
 
 interface Props {
   position: 'NORTH' | 'WEST' | 'SOUTH' | 'EAST'
@@ -60,13 +95,53 @@ interface Props {
   isCurrentPlayer?: boolean
   displayName?: string
   biddingCards?: string[]
+  playedCards?: string[]
+  selectable?: boolean
+  selectedIndices?: number[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   isCurrentPlayer: false,
   displayName: '',
-  biddingCards: () => []
+  biddingCards: () => [],
+  playedCards: () => [],
+  selectable: false,
+  selectedIndices: () => []
 })
+
+const emit = defineEmits<{
+  (e: 'card-click', index: number): void
+}>()
+
+// 鼠标悬停状态（使用节流控制）
+const hoveredIndex = ref<number | null>(null)
+// 默认节流间隔：100ms（可根据体验调整）
+const HOVER_THROTTLE_DELAY = 100
+// 防抖延迟：50ms（用于 mouseleave，避免快速移动时立即清除）
+const HOVER_DEBOUNCE_DELAY = 50
+
+// 节流处理鼠标进入事件
+const handleMouseEnterThrottled = throttle((index: number, cardStr: string) => {
+  // 只有可选择的牌才响应悬停
+  if (props.selectable && cardStr !== '__BACK__') {
+    hoveredIndex.value = index
+  }
+}, HOVER_THROTTLE_DELAY)
+
+// 防抖处理鼠标离开事件（避免快速移动时立即清除悬停状态）
+const handleMouseLeaveDebounced = debounce(() => {
+  hoveredIndex.value = null
+}, HOVER_DEBOUNCE_DELAY)
+
+function handleMouseEnter(index: number, cardStr: string) {
+  // 取消待执行的离开事件（如果存在）
+  handleMouseLeaveDebounced.cancel()
+  handleMouseEnterThrottled(index, cardStr)
+}
+
+function handleMouseLeave() {
+  handleMouseLeaveDebounced()
+}
 
 const biddingPlacementClass = computed(() => {
   switch (props.position) {
@@ -80,6 +155,21 @@ const biddingPlacementClass = computed(() => {
       return 'bidding-left'
     default:
       return 'bidding-bottom'
+  }
+})
+
+const playedCardsPlacementClass = computed(() => {
+  switch (props.position) {
+    case 'NORTH':
+      return 'played-cards-bottom'
+    case 'SOUTH':
+      return 'played-cards-top'
+    case 'WEST':
+      return 'played-cards-right'
+    case 'EAST':
+      return 'played-cards-left'
+    default:
+      return 'played-cards-bottom'
   }
 })
 
@@ -115,40 +205,52 @@ function getHandAreaClass(): string {
   return `${baseClass} ${positionClass}`
 }
 
+// 计算偏移量：当前玩家使用较大偏移（15px），其他玩家使用较小偏移（8px）以堆叠更紧密
+const offsetStep = computed(() => {
+  // 当前玩家的手牌需要看清楚，使用较大偏移
+  // 其他玩家的背面牌可以堆叠更紧密
+  return props.isCurrentPlayer ? 15 : 8
+})
+
 // 计算手牌总宽度（横向）或总高度（纵向）
 const handTotalSize = computed(() => {
   const cardWidth = 60
   const cardHeight = 84
-  const offsetStep = 15
+  const step = offsetStep.value
   
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
     // 横向：总宽度 = 卡牌宽度 + (卡数-1) * 偏移量
     if (props.cards.length === 0) return cardWidth
-    return cardWidth + (props.cards.length - 1) * offsetStep
+    return cardWidth + (props.cards.length - 1) * step
   } else {
     // 纵向：总高度 = 卡牌高度 + (卡数-1) * 偏移量
     if (props.cards.length === 0) return cardHeight
-    return cardHeight + (props.cards.length - 1) * offsetStep
+    return cardHeight + (props.cards.length - 1) * step
   }
 })
 
 // 获取手牌区域的样式（动态调整大小）
 function getHandAreaStyle(): Record<string, string> {
+  // 当前玩家的手牌区域需要更大，其他玩家的可以更小
+  const minSize = props.isCurrentPlayer ? 300 : 200
+  const padding = props.isCurrentPlayer ? 40 : 20
+  const cardWidth = 60 // 单张卡牌宽度
+  
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
     // 横向：根据卡牌数量调整宽度
-    const minWidth = 300
-    const calculatedWidth = Math.max(minWidth, handTotalSize.value + 40) // 加40px边距
+    const calculatedWidth = Math.max(minSize, handTotalSize.value + padding)
     return {
       width: `${calculatedWidth}px`,
-      minWidth: `${minWidth}px`
+      minWidth: `${minSize}px`
     }
   } else {
     // 纵向：根据卡牌数量调整高度
-    const minHeight = 300
-    const calculatedHeight = Math.max(minHeight, handTotalSize.value + 40) // 加40px边距
+    // 宽度设置为卡牌宽度，确保卡牌在容器内居中（通过 left: 50% + translateX(-50%)）
+    const calculatedHeight = Math.max(minSize, handTotalSize.value + padding)
     return {
       height: `${calculatedHeight}px`,
-      minHeight: `${minHeight}px`
+      minHeight: `${minSize}px`,
+      width: `${cardWidth}px` // 固定宽度为单张卡宽度，卡牌通过 left: 50% + translateX(-50%) 居中
     }
   }
 }
@@ -158,15 +260,15 @@ function getCardStyle(index: number): Record<string, string> {
   const totalCards = props.cards.length
   if (totalCards === 0) return {}
   
-  // 每张卡偏移量：卡牌宽度60px的25%，即15px，这样后面的卡会覆盖前面卡的右侧75%
-  const offsetStep = 15 // 每张卡的偏移量（px）
+  // 使用计算出的偏移量（当前玩家15px，其他玩家8px）
+  const step = offsetStep.value
   const cardWidth = 60
   const cardHeight = 84
   
   // 根据位置确定堆叠方向
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
-    // 横向堆叠（左右方向）：后面的卡向右偏移，覆盖前面卡的右侧75%，露出左侧25%
-    const offset = index * offsetStep
+    // 横向堆叠（左右方向）：后面的卡向右偏移
+    const offset = index * step
     
     // 计算居中偏移：让整个手牌区域居中
     const totalWidth = handTotalSize.value
@@ -179,8 +281,8 @@ function getCardStyle(index: number): Record<string, string> {
       transform: 'translateY(-50%)'
     }
   } else {
-    // 纵向堆叠（上下方向）：后面的卡向下偏移，覆盖前面卡的下侧75%，露出上侧25%
-    const offset = index * offsetStep
+    // 纵向堆叠（上下方向）：后面的卡向下偏移
+    const offset = index * step
     
     const totalHeight = handTotalSize.value
     const centerOffset = totalHeight / 2
@@ -194,6 +296,80 @@ function getCardStyle(index: number): Record<string, string> {
   }
 }
 
+// 出牌卡牌堆叠样式（间隔10px，大小和手牌一样）
+const PLAYED_CARD_WIDTH = 60
+const PLAYED_CARD_HEIGHT = 84
+const PLAYED_CARD_SPACING = 10
+
+// 获取出牌卡牌容器样式
+function getPlayedCardsContainerStyle(): Record<string, string> {
+  const count = props.playedCards.length
+  if (count === 0) return {}
+  
+  if (props.position === 'NORTH' || props.position === 'SOUTH') {
+    // 横向堆叠
+    const totalWidth = PLAYED_CARD_WIDTH + (count - 1) * PLAYED_CARD_SPACING
+    return {
+      width: `${totalWidth}px`,
+      height: `${PLAYED_CARD_HEIGHT}px`
+    }
+  } else {
+    // 纵向堆叠
+    const totalHeight = PLAYED_CARD_HEIGHT + (count - 1) * PLAYED_CARD_SPACING
+    return {
+      width: `${PLAYED_CARD_WIDTH}px`,
+      height: `${totalHeight}px`
+    }
+  }
+}
+
+// 获取单张出牌卡牌样式
+function getPlayedCardStyle(index: number): Record<string, string> {
+  const count = props.playedCards.length
+  if (count === 0) return {}
+  
+  if (props.position === 'NORTH' || props.position === 'SOUTH') {
+    // 横向堆叠（左右方向）
+    const totalWidth = PLAYED_CARD_WIDTH + (count - 1) * PLAYED_CARD_SPACING
+    const centerOffset = totalWidth / 2
+    const offset = index * PLAYED_CARD_SPACING
+    
+    return {
+      position: 'absolute',
+      left: `calc(50% - ${centerOffset}px + ${offset}px)`,
+      top: '50%',
+      width: `${PLAYED_CARD_WIDTH}px`,
+      height: `${PLAYED_CARD_HEIGHT}px`,
+      zIndex: `${index + 1}`,
+      transform: 'translateY(-50%)'
+    }
+  } else {
+    // 纵向堆叠（上下方向）
+    const totalHeight = PLAYED_CARD_HEIGHT + (count - 1) * PLAYED_CARD_SPACING
+    const centerOffset = totalHeight / 2
+    const offset = index * PLAYED_CARD_SPACING
+    
+    return {
+      position: 'absolute',
+      top: `calc(50% - ${centerOffset}px + ${offset}px)`,
+      left: '50%',
+      width: `${PLAYED_CARD_WIDTH}px`,
+      height: `${PLAYED_CARD_HEIGHT}px`,
+      zIndex: `${index + 1}`,
+      transform: 'translateX(-50%)'
+    }
+  }
+}
+
+function isSelected(index: number): boolean {
+  return Array.isArray(props.selectedIndices) && props.selectedIndices.includes(index)
+}
+
+function handleCardClick(index: number, cardStr: string) {
+  if (!props.selectable || cardStr === '__BACK__') return
+  emit('card-click', index)
+}
+
 </script>
 
 <style scoped>
@@ -204,12 +380,37 @@ function getCardStyle(index: number): Record<string, string> {
   overflow: visible;
 }
 
+/* 当前玩家和对家：使用 flex 布局，信息在左侧 */
+.player-area.current-player,
+.player-area.opponent-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 玩家信息：默认在上方（其他玩家） */
 .player-info {
   min-height: 36px;
+  flex-shrink: 0;
+}
+
+/* 当前玩家：信息在左侧 */
+.player-info.player-info-left {
+  min-width: 80px;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 其他玩家：信息在上方 */
+.player-info.player-info-top {
+  margin-bottom: 8px;
 }
 
 .hand-wrapper {
   position: relative;
+  flex: 1;
 }
 
 .bidding-overlay {
@@ -260,6 +461,51 @@ function getCardStyle(index: number): Record<string, string> {
   object-fit: cover;
 }
 
+.played-cards-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.played-cards-overlay.played-cards-top {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.played-cards-overlay.played-cards-bottom {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.played-cards-overlay.played-cards-left {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.played-cards-overlay.played-cards-right {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.played-card {
+  position: absolute;
+  height: 58px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid rgba(34, 197, 94, 0.7);
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.played-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .hand-area {
   position: relative;
   min-height: 80px;
@@ -281,11 +527,14 @@ function getCardStyle(index: number): Record<string, string> {
 .hand-west,
 .hand-east {
   position: relative;
-  width: 60px;
+  /* width 由 getHandAreaStyle() 动态设置，确保居中 */
   display: flex;
   justify-content: center;
   align-items: center;
   overflow: visible;
+  /* 确保在父容器中水平居中 */
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .card-stack-item {
@@ -297,14 +546,25 @@ function getCardStyle(index: number): Record<string, string> {
   border-radius: 4px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   transition: all 0.2s ease;
-  cursor: pointer;
+  cursor: default;
   background: rgba(0, 0, 0, 0.1);
 }
 
-.card-stack-item:hover {
+.card-stack-item.selectable {
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.4);
+}
+
+.card-stack-item.selectable.hovered {
   transform: scale(1.1) !important;
   z-index: 9999 !important;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.45);
+}
+
+.card-stack-item.selected {
+  outline: 2px solid rgba(16, 185, 129, 0.9);
+  outline-offset: 2px;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
 }
 
 .card-image {

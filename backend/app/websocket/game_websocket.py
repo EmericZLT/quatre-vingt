@@ -6,8 +6,30 @@ from typing import Dict, List, Optional
 import json
 from app.game.game_state import GameState
 from app.api.game import rooms
+from app.models.game import Card, Rank, Suit
 
 router = APIRouter()
+
+
+def parse_card_strings(card_strings: List[str]) -> List[Card]:
+    """将前端传来的字符串列表转换为Card对象列表"""
+    parsed_cards: List[Card] = []
+    suit_map = {"♠": Suit.SPADES, "♥": Suit.HEARTS, "♣": Suit.CLUBS, "♦": Suit.DIAMONDS}
+    for s in card_strings:
+        try:
+            if "JOKER-A" in s or "JOKER/大王" in s:
+                parsed_cards.append(Card(rank=Rank.BIG_JOKER, is_joker=True))
+            elif "JOKER-B" in s or "JOKER/小王" in s:
+                parsed_cards.append(Card(rank=Rank.SMALL_JOKER, is_joker=True))
+            else:
+                suit_char = s[-1]
+                rank_str = s[:-1]
+                suit = suit_map.get(suit_char)
+                rank = Rank(rank_str)
+                parsed_cards.append(Card(rank=rank, suit=suit))
+        except Exception:
+            continue
+    return parsed_cards
 
 # Store active connections
 class ConnectionInfo:
@@ -174,6 +196,7 @@ class ConnectionManager:
                 sorted_cards = sorter.sort_cards(player.cards)
                 my_hand = [str(card) for card in sorted_cards]
         
+        dealer = gs.get_dealer() if gs else None
         snapshot = {
             "type": "state_snapshot",
             "room_id": room_id,
@@ -182,6 +205,7 @@ class ConnectionManager:
             "current_level": gs.card_system.current_level if gs and gs.card_system else None,
             "phase": gs.game_phase,
             "dealer_position": gs.dealer_position.value if gs.dealer_position else None,
+            "dealer_player_id": dealer.id if dealer else None,
             "trump_suit": gs.trump_suit.value if gs.trump_suit else None,
             "dealt_count": gs.dealt_count,
             "players": [
@@ -194,7 +218,9 @@ class ConnectionManager:
                 for p in gs.room.players
             ],
             "bottom_cards_count": len(gs.bottom_cards),
-            "scores": gs.scores,
+            "dealer_has_bottom": gs.dealer_has_bottom,
+            "bottom_pending": getattr(gs, "bottom_pending", False),
+            "idle_score": gs.idle_score,
             "tricks_won": gs.tricks_won,
             "my_hand": my_hand,  # 只有自己的手牌
             "players_cards_count": {
@@ -210,6 +236,25 @@ class ConnectionManager:
             snapshot["bidding"] = gs.get_bidding_status()
         except Exception:
             pass
+        if player_id and dealer and player_id == dealer.id and gs.bottom_cards:
+            snapshot["bottom_cards"] = [str(card) for card in gs.bottom_cards]
+        
+        # 添加当前轮次和上一轮出牌信息
+        if hasattr(gs, "current_trick_with_player"):
+            snapshot["current_trick"] = gs.current_trick_with_player
+        if hasattr(gs, "last_trick"):
+            snapshot["last_trick"] = gs.last_trick
+        # 添加当前应该出牌的玩家
+        # 优先使用GameState的current_player（实时更新）
+        if hasattr(gs, "current_player") and gs.current_player:
+            snapshot["current_player"] = gs.current_player.value
+        # 如果没有current_player，尝试使用CardPlayingSystem的expected_leader（作为后备）
+        elif gs.card_playing_system and hasattr(gs.card_playing_system, "expected_leader"):
+            expected_leader = gs.card_playing_system.expected_leader
+            if expected_leader:
+                snapshot["current_player"] = expected_leader.value
+        else:
+            snapshot["current_player"] = None
         
         if player_id:
             # 只发送给特定玩家
@@ -234,6 +279,10 @@ class ConnectionManager:
                             pos.position.value: len(pos.cards) for pos in gs.room.players
                         }
                         personal_snapshot["my_hand"] = personal_hand
+                        if dealer and conn.player_id == dealer.id and gs.bottom_cards:
+                            personal_snapshot["bottom_cards"] = [str(card) for card in gs.bottom_cards]
+                        else:
+                            personal_snapshot.pop("bottom_cards", None)
                         try:
                             await conn.websocket.send_text(json.dumps(personal_snapshot))
                         except:
@@ -417,26 +466,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                 if not gs or not player_id_current:
                     await manager.send_personal_message(json.dumps({"type": "error", "message": "不可亮主"}), websocket)
                 else:
-                    # 将前端的字符串牌转换为Card
-                    from app.models.game import Card, Rank, Suit
                     cards_str = message.get("cards") or []
-                    parsed_cards = []
-                    for s in cards_str:
-                        try:
-                            if "JOKER-A" in s:
-                                parsed_cards.append(Card(rank=Rank.BIG_JOKER, is_joker=True))
-                            elif "JOKER-B" in s:
-                                parsed_cards.append(Card(rank=Rank.SMALL_JOKER, is_joker=True))
-                            else:
-                                # 形如 "10♥" "A♣"
-                                suit_char = s[-1]
-                                rank_str = s[:-1]
-                                suit_map = {"♠": Suit.SPADES, "♥": Suit.HEARTS, "♣": Suit.CLUBS, "♦": Suit.DIAMONDS}
-                                suit = suit_map.get(suit_char)
-                                rank = Rank(rank_str)
-                                parsed_cards.append(Card(rank=rank, suit=suit))
-                        except Exception:
-                            continue
+                    parsed_cards = parse_card_strings(cards_str)
                     result = gs.make_bid(player_id_current, parsed_cards)
                     bid_payload = {
                         "type": "bidding_updated",
@@ -474,6 +505,35 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                         await manager.send_snapshot(room_id)
                     else:
                         await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "不可亮主")}), websocket)
+            elif msg_type == "submit_bottom":
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法扣底"}), websocket)
+                else:
+                    dealer = gs.get_dealer()
+                    if not dealer or dealer.id != player_id_current:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": "仅庄家可以扣底"}), websocket)
+                    elif not gs.bottom_pending:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": "当前不需要扣底"}), websocket)
+                    else:
+                        cards_str = message.get("cards") or []
+                        parsed_cards = parse_card_strings(cards_str)
+                        success = gs.dealer_discard_bottom(parsed_cards)
+                        if success:
+                            payload = {
+                                "type": "bottom_updated",
+                                "bottom_cards_count": len(gs.bottom_cards),
+                                "dealer_has_bottom": gs.dealer_has_bottom,
+                                "bottom_pending": gs.bottom_pending,
+                                "dealer_player_id": dealer.id,
+                                "phase": gs.game_phase
+                            }
+                            await manager.broadcast_to_room(json.dumps(payload), room_id)
+                            if gs.game_phase == "playing":
+                                await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": "playing"}), room_id)
+                            await manager.send_snapshot(room_id)
+                        else:
+                            await manager.send_personal_message(json.dumps({"type": "error", "message": "扣底失败，请检查所选牌"}), websocket)
             elif msg_type == "finish_bidding":
                 gs = manager.get_game_state(room_id)
                 if not gs:
@@ -483,6 +543,100 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     if ok:
                         await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": gs.game_phase}), room_id)
                     await manager.send_snapshot(room_id)
+            elif msg_type == "play_card":
+                # 玩家出牌（支持多张牌）
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法出牌"}), websocket)
+                else:
+                    # 检查是否轮到当前玩家出牌
+                    player = gs.get_player_by_id(player_id_current)
+                    if not player:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": "玩家不存在"}), websocket)
+                    else:
+                        # 检查出牌顺序：优先使用current_player（实时更新）
+                        expected_position = None
+                        if gs.current_player:
+                            # 优先使用GameState的current_player（实时更新）
+                            expected_position = gs.current_player
+                        elif len(gs.current_trick_with_player) == 0:
+                            # 第一轮，应该由庄家领出
+                            expected_position = gs.dealer_position
+                        elif gs.card_playing_system and hasattr(gs.card_playing_system, "expected_leader") and gs.card_playing_system.expected_leader:
+                            # 如果没有current_player，使用expected_leader（作为后备）
+                            expected_position = gs.card_playing_system.expected_leader
+                        else:
+                            # 后续轮次，按逆时针顺序
+                            last_player_pos = gs.current_trick_with_player[-1]["player_position"]
+                            positions = [PlayerPosition.NORTH, PlayerPosition.WEST, PlayerPosition.SOUTH, PlayerPosition.EAST]
+                            last_pos = next((p for p in positions if p.value == last_player_pos), None)
+                            if last_pos:
+                                last_idx = positions.index(last_pos)
+                                next_idx = (last_idx + 1) % 4
+                                expected_position = positions[next_idx]
+                        
+                        if expected_position and player.position != expected_position:
+                            await manager.send_personal_message(json.dumps({"type": "error", "message": f"未轮到您出牌，应由{expected_position.value}出牌"}), websocket)
+                            continue
+                        
+                        # 解析卡牌（支持多张）
+                        cards_str = message.get("cards") or message.get("card")  # 兼容单张和多张
+                        if not cards_str:
+                            await manager.send_personal_message(json.dumps({"type": "error", "message": "请选择要出的牌"}), websocket)
+                        else:
+                            # 转换为列表格式
+                            if isinstance(cards_str, str):
+                                cards_str = [cards_str]
+                            
+                            # 将字符串转换为Card对象
+                            parsed_cards = parse_card_strings(cards_str)
+                            if not parsed_cards:
+                                await manager.send_personal_message(json.dumps({"type": "error", "message": "无效的卡牌"}), websocket)
+                            else:
+                                result = gs.play_card(player_id_current, parsed_cards)
+                                if result.get("success"):
+                                    # 检查是否完成一轮（必须在play_card之后检查，因为play_card会更新状态）
+                                    trick_was_complete = len(gs.current_trick_with_player) == 0
+                                    
+                                    # 广播出牌事件（确保current_player已经更新）
+                                    play_event = {
+                                        "type": "card_played",
+                                        "player_id": player_id_current,
+                                        "player_position": player.position.value,
+                                        "cards": cards_str,  # 改为cards列表
+                                        "current_trick": gs.current_trick_with_player if hasattr(gs, "current_trick_with_player") else [],
+                                        "trick_complete": trick_was_complete,
+                                        "current_player": gs.current_player.value if gs.current_player else None
+                                    }
+                                    await manager.broadcast_to_room(json.dumps(play_event), room_id)
+                                    
+                                    # 如果一轮结束，发送获胜者信息和上一轮出牌
+                                    if trick_was_complete and hasattr(gs, "last_trick"):
+                                        trick_complete_event = {
+                                            "type": "trick_complete",
+                                            "last_trick": gs.last_trick,
+                                            "tricks_won": gs.tricks_won,
+                                            "idle_score": gs.idle_score,  # 添加分数信息
+                                            "current_player": gs.current_player.value if gs.current_player else None
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(trick_complete_event), room_id)
+                                        # 发送分数更新事件
+                                        score_event = {
+                                            "type": "score_updated",
+                                            "idle_score": gs.idle_score
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(score_event), room_id)
+                                    
+                                    await manager.send_snapshot(room_id)
+                                else:
+                                    # 出牌失败，返回错误信息
+                                    error_msg = result.get("message", "出牌失败")
+                                    forced_cards = result.get("forced_cards")
+                                    # 将Card对象转换为字符串列表
+                                    forced_cards_str = None
+                                    if forced_cards:
+                                        forced_cards_str = [str(card) for card in forced_cards]
+                                    await manager.send_personal_message(json.dumps({"type": "error", "message": error_msg, "forced_cards": forced_cards_str}), websocket)
             elif msg_type == "auto_deal":
                 # 自动发牌（用于演示）
                 if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):
