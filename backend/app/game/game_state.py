@@ -64,6 +64,7 @@ class GameState:
         self.bidding_turn_player_id: Optional[str] = None
         self._bidding_queue: List[str] = []
         self.card_playing_system: Optional[CardPlayingSystem] = None  # 出牌系统，在trump_suit确定后初始化
+        self.current_trick_max_player_id: Optional[str] = None  # 当前轮次中牌更大的玩家ID
         
     def start_game(self) -> bool:
         """开始游戏"""
@@ -477,6 +478,32 @@ class GameState:
         if is_leading:
             self.current_trick.append(cards[0])
             self.trick_leader = player.position
+            # 新的一轮开始，重置当前轮次最大玩家
+            self.current_trick_max_player_id = player_id
+        else:
+            # 跟牌时，判断是否比当前最大玩家更大
+            if self.current_trick_max_player_id and self.card_playing_system:
+                # 获取当前最大玩家的牌
+                max_player = self.get_player_by_id(self.current_trick_max_player_id)
+                if max_player:
+                    # 找到当前最大玩家在当前轮次出的牌
+                    max_player_cards = None
+                    for entry in self.current_trick_with_player:
+                        if entry["player_id"] == self.current_trick_max_player_id:
+                            # 将字符串转换回Card对象
+                            from app.models.game import Card, Rank, Suit
+                            max_player_cards = []
+                            for card_str in entry["cards"]:
+                                parsed = self._parse_card_string(card_str)
+                                if parsed:
+                                    max_player_cards.append(parsed)
+                            break
+                    
+                    if max_player_cards:
+                        # 使用CardPlayingSystem的比较逻辑
+                        if self.card_playing_system.compare_cards_in_trick(cards, max_player_cards):
+                            # 当前玩家的牌更大，更新最大玩家
+                            self.current_trick_max_player_id = player_id
         
         # 如果一轮出完（4个玩家都出完），判断获胜者
         if len(self.current_trick_with_player) == 4:
@@ -495,12 +522,16 @@ class GameState:
                 # 更新current_player为下一轮的领出者
                 self.current_player = winner
             
-            # 保存上一轮出牌信息
+            # 保存上一轮出牌信息（在清空之前保存，用于前端延迟显示）
             self.last_trick = self.current_trick_with_player.copy()
-            # 清空当前轮次
+            # 清空当前轮次（为下一轮准备）
+            # 注意：前端会延迟2秒清空显示，但后端需要立即清空以便下一轮使用
             self.current_trick = []
-            self.current_trick_with_player = []
+            # 注意：保留current_trick_with_player，让前端在trick_complete事件中获取
+            # 在websocket处理完trick_complete事件后再清空
+            # self.current_trick_with_player = []  # 延迟清空，在websocket中处理
             self.trick_leader = None
+            self.current_trick_max_player_id = None  # 清空当前轮次最大玩家
         else:
             # 如果还没完成一轮，更新current_player为下一个玩家（逆时针）
             # 无论是领出还是跟牌，都需要更新current_player
@@ -707,7 +738,8 @@ class GameState:
                 for player in self.room.players
             ],
             "idle_score": self.idle_score,
-            "tricks_won": self.tricks_won
+            "tricks_won": self.tricks_won,
+            "current_trick_max_player_id": self.current_trick_max_player_id
         }
         
         # 添加亮主状态
@@ -748,3 +780,22 @@ class GameState:
             if player:
                 result.append(player.id)
         return result
+    
+    def _parse_card_string(self, card_str: str) -> Optional[Card]:
+        """解析卡牌字符串为Card对象"""
+        from app.models.game import Card, Rank, Suit
+        try:
+            if "JOKER-A" in card_str or "JOKER/大王" in card_str:
+                return Card(rank=Rank.BIG_JOKER, is_joker=True)
+            elif "JOKER-B" in card_str or "JOKER/小王" in card_str:
+                return Card(rank=Rank.SMALL_JOKER, is_joker=True)
+            else:
+                suit_map = {"♠": Suit.SPADES, "♥": Suit.HEARTS, "♣": Suit.CLUBS, "♦": Suit.DIAMONDS}
+                suit_char = card_str[-1]
+                rank_str = card_str[:-1]
+                suit = suit_map.get(suit_char)
+                rank = Rank(rank_str)
+                return Card(rank=rank, suit=suit)
+        except:
+            return None
+    

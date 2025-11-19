@@ -244,6 +244,12 @@ class ConnectionManager:
             snapshot["current_trick"] = gs.current_trick_with_player
         if hasattr(gs, "last_trick"):
             snapshot["last_trick"] = gs.last_trick
+        # 添加当前轮次最大玩家信息
+        if hasattr(gs, "current_trick_max_player_id") and gs.current_trick_max_player_id:
+            max_player = gs.get_player_by_id(gs.current_trick_max_player_id)
+            if max_player:
+                snapshot["current_trick_max_player_id"] = gs.current_trick_max_player_id
+                snapshot["current_trick_max_player_name"] = max_player.name
         # 添加当前应该出牌的玩家
         # 优先使用GameState的current_player（实时更新）
         if hasattr(gs, "current_player") and gs.current_player:
@@ -596,9 +602,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                 result = gs.play_card(player_id_current, parsed_cards)
                                 if result.get("success"):
                                     # 检查是否完成一轮（必须在play_card之后检查，因为play_card会更新状态）
-                                    trick_was_complete = len(gs.current_trick_with_player) == 0
+                                    # 注意：play_card中如果一轮完成，会保存last_trick但不清空current_trick_with_player（延迟清空）
+                                    # 所以这里检查：如果current_trick_with_player长度为4，说明刚完成一轮
+                                    trick_was_complete = len(gs.current_trick_with_player) == 4
                                     
                                     # 广播出牌事件（确保current_player已经更新）
+                                    # 获取当前轮次最大玩家名称
+                                    current_trick_max_player_name = None
+                                    if hasattr(gs, "current_trick_max_player_id") and gs.current_trick_max_player_id:
+                                        max_player = gs.get_player_by_id(gs.current_trick_max_player_id)
+                                        if max_player:
+                                            current_trick_max_player_name = max_player.name
+                                    
                                     play_event = {
                                         "type": "card_played",
                                         "player_id": player_id_current,
@@ -606,15 +621,20 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                         "cards": cards_str,  # 改为cards列表
                                         "current_trick": gs.current_trick_with_player if hasattr(gs, "current_trick_with_player") else [],
                                         "trick_complete": trick_was_complete,
-                                        "current_player": gs.current_player.value if gs.current_player else None
+                                        "current_player": gs.current_player.value if gs.current_player else None,
+                                        "current_trick_max_player": current_trick_max_player_name
                                     }
                                     await manager.broadcast_to_room(json.dumps(play_event), room_id)
                                     
                                     # 如果一轮结束，发送获胜者信息和上一轮出牌
                                     if trick_was_complete and hasattr(gs, "last_trick"):
+                                        # 在清空之前保存当前轮次的牌（用于前端延迟显示）
+                                        # 此时current_trick_with_player还包含上一轮的数据（在play_card中未清空）
+                                        # 使用last_trick作为current_trick，因为last_trick是上一轮完成时的数据
                                         trick_complete_event = {
                                             "type": "trick_complete",
                                             "last_trick": gs.last_trick,
+                                            "current_trick": gs.last_trick.copy(),  # 使用last_trick作为current_trick（用于延迟显示）
                                             "tricks_won": gs.tricks_won,
                                             "idle_score": gs.idle_score,  # 添加分数信息
                                             "current_player": gs.current_player.value if gs.current_player else None
@@ -626,17 +646,55 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                             "idle_score": gs.idle_score
                                         }
                                         await manager.broadcast_to_room(json.dumps(score_event), room_id)
+                                        # 发送完事件后，清空current_trick_with_player（为下一轮准备）
+                                        gs.current_trick_with_player = []
                                     
                                     await manager.send_snapshot(room_id)
                                 else:
-                                    # 出牌失败，返回错误信息
+                                    # 出牌失败，检查是否是甩牌失败（有forced_cards）
                                     error_msg = result.get("message", "出牌失败")
                                     forced_cards = result.get("forced_cards")
-                                    # 将Card对象转换为字符串列表
                                     forced_cards_str = None
                                     if forced_cards:
                                         forced_cards_str = [str(card) for card in forced_cards]
-                                    await manager.send_personal_message(json.dumps({"type": "error", "message": error_msg, "forced_cards": forced_cards_str}), websocket)
+                                    
+                                    # 如果是甩牌失败（有forced_cards），先广播出牌事件让所有玩家看到甩出的牌
+                                    if forced_cards_str:
+                                        # 临时添加到current_trick_with_player用于显示（但不从手牌中移除）
+                                        temp_trick_entry = {
+                                            "player_id": player_id_current,
+                                            "player_position": player.position.value,
+                                            "cards": cards_str,
+                                            "slingshot_failed": True  # 标记为甩牌失败
+                                        }
+                                        # 创建临时的current_trick用于显示
+                                        temp_current_trick = gs.current_trick_with_player.copy()
+                                        temp_current_trick.append(temp_trick_entry)
+                                        
+                                        # 广播出牌事件（让所有玩家看到甩出的牌）
+                                        play_event = {
+                                            "type": "card_played",
+                                            "player_id": player_id_current,
+                                            "player_position": player.position.value,
+                                            "cards": cards_str,
+                                            "current_trick": temp_current_trick,
+                                            "trick_complete": False,
+                                            "slingshot_failed": True,  # 标记为甩牌失败
+                                            "current_player": gs.current_player.value if gs.current_player else None
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(play_event), room_id)
+                                        
+                                        # 广播甩牌失败提示（让所有玩家都能看到）
+                                        slingshot_failed_notification = {
+                                            "type": "slingshot_failed_notification",
+                                            "message": "首家甩牌失败，强制出小",
+                                            "player_position": player.position.value,
+                                            "player_name": player.name if hasattr(player, 'name') else None
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(slingshot_failed_notification), room_id)
+                                    
+                                    # 发送错误信息（包含forced_cards）
+                                    await manager.send_personal_message(json.dumps({"type": "error", "message": error_msg, "forced_cards": forced_cards_str, "slingshot_failed": bool(forced_cards_str)}), websocket)
             elif msg_type == "auto_deal":
                 # 自动发牌（用于演示）
                 if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):
@@ -649,7 +707,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                         if gs:
                             while gs.dealt_count < 100 and gs.game_phase == "dealing":
                                 await manager.handle_deal_tick(room_id)
-                                await asyncio.sleep(0.2)
+                                await asyncio.sleep(0.1)
                     asyncio.create_task(auto_deal_task())
             else:
                 # 其他消息类型可以后续扩展

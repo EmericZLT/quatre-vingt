@@ -67,7 +67,8 @@ class SlingshotLogic:
             return SlingshotResult(False, "All cards must be of the same suit")
         
         # 4. 分析牌型组合
-        card_types = self._analyze_card_types(cards)
+        analysis = self._analyze_card_types(cards)
+        card_types = analysis["card_types"]  # 使用兼容的card_types字段
         
         # 注意：甩牌是否成功由其他玩家是否能管上来决定
         # 自己手中的其他牌不影响甩牌的有效性
@@ -144,72 +145,54 @@ class SlingshotLogic:
         
         return True
     
-    def _analyze_card_types(self, cards: List[Card]) -> List[str]:
+    def _analyze_card_types(self, cards: List[Card]) -> Dict[str, any]:
         """
-        分析牌型组合
+        分析牌型组合，返回详细信息
         
         Returns:
-            牌型列表，如：["tractor", "pair", "single"]
+            包含牌型详细信息的字典：
+            {
+                "tractors": [{"length": 2, "pairs": 2}, ...],  # 每个拖拉机的长度（对子数）
+                "tractor_count": 2,  # 拖拉机数量
+                "tractor_total_pairs": 4,  # 拖拉机总共包含的对子数
+                "pair_count": 1,  # 对子数量
+                "single_count": 2,  # 单牌数量
+                "card_types": ["tractor", "pair", "single"]  # 兼容旧接口的牌型列表
+            }
         """
-        card_types = []
-        remaining_cards = cards.copy()
+        from typing import Dict, List, Any
         
-        # 按照rank分组
-        rank_groups: Dict[str, List[Card]] = {}
-        for card in remaining_cards:
-            key = f"{card.rank}_{card.suit}"
-            if key not in rank_groups:
-                rank_groups[key] = []
-            rank_groups[key].append(card)
+        result: Dict[str, Any] = {
+            "tractors": [],
+            "tractor_count": 0,
+            "tractor_total_pairs": 0,
+            "pair_count": 0,
+            "single_count": 0,
+            "card_types": []
+        }
         
-        # 1. 先识别拖拉机
-        sorted_groups = sorted(rank_groups.items(), key=lambda x: self.comparison._get_rank_value(x[1][0].rank), reverse=True)
+        # 使用_decompose_slingshot来分解牌
+        tractors, pairs, singles = self._decompose_slingshot(cards)
         
-        i = 0
-        while i < len(sorted_groups):
-            current_key, current_cards = sorted_groups[i]
-            
-            # 检查是否是对子
-            if len(current_cards) >= 2:
-                # 尝试找连续的对子形成拖拉机
-                tractor_groups = [(current_key, current_cards)]
-                j = i + 1
-                
-                while j < len(sorted_groups):
-                    next_key, next_cards = sorted_groups[j]
-                    if len(next_cards) >= 2:
-                        # 检查是否相邻（传入Rank而不是Card）
-                        if self.tractor_logic._are_adjacent(current_cards[0].rank, next_cards[0].rank):
-                            tractor_groups.append((next_key, next_cards))
-                            current_cards = next_cards
-                            j += 1
-                        else:
-                            break
-                    else:
-                        break
-                
-                # 如果找到至少2组连续对子，就是拖拉机
-                if len(tractor_groups) >= 2:
-                    card_types.append("tractor")
-                    # 移除已识别的牌
-                    for key, _ in tractor_groups:
-                        sorted_groups = [(k, c) for k, c in sorted_groups if k != key]
-                    i = 0  # 重新开始
-                    continue
-            
-            i += 1
+        # 统计拖拉机信息
+        result["tractor_count"] = len(tractors)
+        for tractor in tractors:
+            tractor_length = len(tractor) // 2  # 拖拉机长度（对子数）
+            result["tractors"].append({"length": tractor_length, "pairs": tractor_length})
+            result["tractor_total_pairs"] += tractor_length
+            result["card_types"].append("tractor")
         
-        # 2. 再识别对子
-        for key, cards_list in sorted_groups:
-            if len(cards_list) >= 2:
-                card_types.append("pair")
+        # 统计对子信息
+        result["pair_count"] = len(pairs)
+        for _ in pairs:
+            result["card_types"].append("pair")
         
-        # 3. 最后识别单牌
-        for key, cards_list in sorted_groups:
-            if len(cards_list) == 1:
-                card_types.append("single")
+        # 统计单牌信息
+        result["single_count"] = len(singles)
+        for _ in singles:
+            result["card_types"].append("single")
         
-        return card_types
+        return result
     
     def check_slingshot_challenge(
         self,
@@ -259,27 +242,73 @@ class SlingshotLogic:
         
         # 2. 检查对子
         if slingshot_pairs:
-            # 找出甩牌对子中的最小对子
             min_pair = min(slingshot_pairs, key=lambda pair: self.comparison._get_card_value(pair[0]))
             min_pair_card = min_pair[0]
             
-            # 检查挑战者是否有更大的对子（可以从拖拉机中拆出）
+            # 检查挑战者是否有更大的对子
             challenger_pair_max = self._find_max_card_in_pairs(same_suit_cards)
             
             if challenger_pair_max and self.comparison.compare_cards(challenger_pair_max, min_pair_card) > 0:
                 return True, same_suit_cards
         
-        # 3. 检查拖拉机
+        # 3. 检查拖拉机（按长度分组，独立检查）
         if slingshot_tractors:
-            # 找出甩牌拖拉机中的最小拖拉机（比较拖拉机中的最小对子）
-            min_tractor = min(slingshot_tractors, key=lambda t: self.comparison._get_card_value(min(t, key=lambda c: self.comparison._get_card_value(c))))
-            min_tractor_card = min(min_tractor, key=lambda c: self.comparison._get_card_value(c))
+            # 按拖拉机长度分组
+            tractors_by_length = {}
+            for tractor in slingshot_tractors:
+                length = len(tractor) // 2  # 拖拉机长度（对子数）
+                if length not in tractors_by_length:
+                    tractors_by_length[length] = []
+                tractors_by_length[length].append(tractor)
             
-            # 检查挑战者是否有更大的拖拉机（整体比较）
-            challenger_tractor_max = self._find_max_card_in_tractors(same_suit_cards)
+            # 分解挑战者的牌，获取所有可能的拖拉机
+            challenger_tractors, challenger_pairs, _ = self._decompose_slingshot(same_suit_cards)
             
-            if challenger_tractor_max and self.comparison.compare_cards(challenger_tractor_max, min_tractor_card) > 0:
-                return True, same_suit_cards
+            # 按长度分组挑战者的拖拉机
+            challenger_tractors_by_length = {}
+            for tractor in challenger_tractors:
+                length = len(tractor) // 2
+                if length not in challenger_tractors_by_length:
+                    challenger_tractors_by_length[length] = []
+                challenger_tractors_by_length[length].append(tractor)
+            
+            # 对每个长度的拖拉机独立检查
+            for length, tractors in tractors_by_length.items():
+                # 找出该长度甩牌拖拉机中的最小拖拉机（比较最小对子）
+                min_tractor = min(tractors, key=lambda t: self.comparison._get_card_value(min(t, key=lambda c: self.comparison._get_card_value(c))))
+                min_tractor_card = min(min_tractor, key=lambda c: self.comparison._get_card_value(c))
+                
+                # 检查挑战者是否有更大的拖拉机可以管上
+                # 挑战者可以用相同长度或更长的拖拉机来管上
+                can_challenge = False
+                
+                # 1. 检查相同长度的拖拉机
+                if length in challenger_tractors_by_length:
+                    for challenger_tractor in challenger_tractors_by_length[length]:
+                        # 比较拖拉机中的最大对子
+                        challenger_max_pair = max(challenger_tractor, key=lambda c: self.comparison._get_card_value(c))
+                        if self.comparison.compare_cards(challenger_max_pair, min_tractor_card) > 0:
+                            can_challenge = True
+                            break
+                
+                # 2. 检查更长的拖拉机（可以拆分成该长度的拖拉机）
+                if not can_challenge:
+                    for longer_length in challenger_tractors_by_length.keys():
+                        if longer_length > length:
+                            for challenger_tractor in challenger_tractors_by_length[longer_length]:
+                                # 从长拖拉机中提取前length对，检查是否可以管上
+                                # 拖拉机是按顺序排列的，前length对就是前length*2张牌
+                                extracted_tractor = challenger_tractor[:length * 2]
+                                extracted_max_pair = max(extracted_tractor, key=lambda c: self.comparison._get_card_value(c))
+                                if self.comparison.compare_cards(extracted_max_pair, min_tractor_card) > 0:
+                                    can_challenge = True
+                                    break
+                            if can_challenge:
+                                break
+                
+                # 3. 如果该长度的拖拉机被管上，甩牌失败
+                if can_challenge:
+                    return True, same_suit_cards
         
         return False, []
     
@@ -307,7 +336,7 @@ class SlingshotLogic:
         # 标记已使用的牌
         used_keys = set()
         
-        # 1. 先识别拖拉机（两对相邻的对子）
+        # 1. 先识别拖拉机（连续的对子链，至少2对）
         sorted_keys = sorted(rank_count.keys(), key=lambda k: self.comparison._get_card_value(rank_cards[k][0]), reverse=True)
         
         i = 0
@@ -317,27 +346,42 @@ class SlingshotLogic:
                 i += 1
                 continue
             
-            # 尝试找相邻的对子形成拖拉机
+            # 尝试构建连续的对子链（拖拉机）
+            tractor_chain = [key1]  # 从当前key开始
+            current_key = key1
+            current_card = rank_cards[key1][0]
+            
+            # 继续向后查找相邻的对子，构建完整的链
             j = i + 1
             while j < len(sorted_keys):
-                key2 = sorted_keys[j]
-                if key2 in used_keys or rank_count[key2] < 2:
+                next_key = sorted_keys[j]
+                if next_key in used_keys or rank_count[next_key] < 2:
                     j += 1
                     continue
                 
-                card1 = rank_cards[key1][0]
-                card2 = rank_cards[key2][0]
+                next_card = rank_cards[next_key][0]
                 
-                # 检查是否相邻
-                if self.tractor_logic._are_adjacent(card1.rank, card2.rank):
-                    # 形成拖拉机
-                    tractor = rank_cards[key1][:2] + rank_cards[key2][:2]
-                    tractors.append(tractor)
-                    used_keys.add(key1)
-                    used_keys.add(key2)
+                # 检查是否与链中的最后一个对子相邻
+                if self.tractor_logic._are_adjacent(current_card.rank, next_card.rank):
+                    # 添加到链中
+                    tractor_chain.append(next_key)
+                    current_key = next_key
+                    current_card = next_card
+                    j += 1
+                else:
+                    # 不再相邻，停止扩展链
                     break
-                
-                j += 1
+            
+            # 如果链长度>=2对，形成一个完整的拖拉机
+            if len(tractor_chain) >= 2:
+                # 构建拖拉机：将所有对子组合在一起
+                tractor = []
+                for key in tractor_chain:
+                    tractor.extend(rank_cards[key][:2])
+                tractors.append(tractor)
+                # 标记所有已使用的key
+                for key in tractor_chain:
+                    used_keys.add(key)
             
             i += 1
         
@@ -354,37 +398,17 @@ class SlingshotLogic:
         
         return tractors, pairs, singles
     
-    def _find_max_card_in_tractors(self, cards: List[Card]) -> Card:
-        """找出拖拉机中的最大牌"""
-        # 简化：找出所有对子中的最大牌
-        rank_count = {}
-        for card in cards:
-            key = f"{card.rank}_{card.suit}"
-            rank_count[key] = rank_count.get(key, 0) + 1
-        
-        # 找出所有对子
-        pairs = []
-        for card in cards:
-            key = f"{card.rank}_{card.suit}"
-            if rank_count[key] >= 2 and card not in pairs:
-                pairs.append(card)
-        
-        if not pairs:
-            return max(cards, key=lambda c: self.comparison._get_card_value(c))
-        
-        return max(pairs, key=lambda c: self.comparison._get_card_value(c))
-    
     def _find_max_card_in_pairs(self, cards: List[Card]) -> Optional[Card]:
         """找出对子中的最大牌"""
         rank_count = {}
         for card in cards:
-            key = f"{card.rank}_{card.suit}"
+            key = self._card_key(card)
             rank_count[key] = rank_count.get(key, 0) + 1
         
         # 找出所有对子
         pairs = []
         for card in cards:
-            key = f"{card.rank}_{card.suit}"
+            key = self._card_key(card)
             if rank_count[key] >= 2 and card not in pairs:
                 pairs.append(card)
         

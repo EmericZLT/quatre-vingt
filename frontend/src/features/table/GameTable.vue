@@ -71,8 +71,9 @@
           <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
           <div>主牌花色：<span class="font-semibold">{{ displayTrumpSuit }}</span></div>
           <div>庄家：<span class="font-semibold">{{ dealerLabel }}</span></div>
-          <div>当前最高：<span class="font-semibold">{{ displayCurrentBid }}</span></div>
+          <div v-if="!trumpSuit">当前最高：<span class="font-semibold">{{ displayCurrentBid }}</span></div>
           <div v-if="phase === 'bottom'" class="text-amber-200/80">扣底阶段：{{ bottomStatusText }}</div>
+          <div v-if="phase === 'playing' && currentTrickMaxPlayer">本轮最大：<span class="font-semibold">{{ currentTrickMaxPlayer }}</span></div>
         </div>
         <!-- 右上角：闲家总得分 -->
         <div class="absolute top-4 right-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
@@ -80,6 +81,16 @@
           <div class="text-lg font-bold text-amber-300">{{ idleScoreTotal }}</div>
         </div>
         <!-- 中央区域（底牌已完全隐藏，通过右上角按钮查看） -->
+        
+        <!-- 中央提示框（用于显示甩牌失败等全局提示） -->
+        <div
+          v-if="centerNotification.show"
+          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-red-900/90 text-white px-6 py-4 rounded-lg shadow-2xl border-2 border-red-500"
+        >
+          <div class="text-xl font-bold text-center">
+            {{ centerNotification.message }}
+          </div>
+        </div>
 
         <!-- 顶部（上方） -->
         <div class="absolute top-8 left-1/2 transform -translate-x-1/2 z-20">
@@ -313,7 +324,7 @@
           class="flex items-center gap-4 p-3 bg-slate-700/50 rounded"
         >
           <div class="text-base font-bold text-white min-w-[100px]">
-            {{ getPlayerNameByPosition(trickCard.player_position as Pos) }}：
+            {{ getPlayerNameFromTrickCard(trickCard) }}：
           </div>
           <div class="flex gap-2 flex-wrap">
             <img
@@ -342,7 +353,7 @@ import { useWsStore } from '@/stores/ws'
 import { useGameStore } from '@/stores/game'
 import { useRoomStore } from '@/stores/room'
 import PlayerArea from './PlayerArea.vue'
-import { getCardImageFromString } from '@/utils/cards'
+import { getCardImageFromString, parseCardString } from '@/utils/cards'
 
 type Pos = 'NORTH' | 'WEST' | 'SOUTH' | 'EAST'
 
@@ -378,6 +389,7 @@ const canStart = computed(() => (Array.isArray(players.value) ? players.value.le
 const currentLevel = ref<number | string>('?')
 const trumpSuit = ref<string | null>(null)
 const biddingStatus = ref<any>(null)
+const currentTrickMaxPlayer = ref<string | null>(null)  // 当前轮次中牌更大的玩家
 const showBiddingPanel = computed(() => phase.value === 'dealing' || phase.value === 'bidding')
 const currentBid = computed(() => biddingStatus.value?.current_bid || null)
 const turnPlayerId = computed<string | null>(() => biddingStatus.value?.turn_player_id ?? null)
@@ -564,11 +576,79 @@ function getPlayerNameByPosition(pos: Pos): string {
   return player?.name || getPosLabel(pos)
 }
 
+// 从上轮出牌数据中获取玩家名称（优先使用player_id，其次使用player_position）
+function getPlayerNameFromTrickCard(trickCard: any): string {
+  // 优先使用player_id获取玩家名
+  if (trickCard.player_id && playerNameMap.value[trickCard.player_id]) {
+    return playerNameMap.value[trickCard.player_id]
+  }
+  // 如果没有player_id或找不到，使用player_position
+  if (trickCard.player_position) {
+    const pos = (trickCard.player_position as string)?.toUpperCase() as Pos
+    return getPlayerNameByPosition(pos)
+  }
+  return '未知玩家'
+}
+
 // "上轮"查看功能
 const showLastTrick = ref(false)
 const lastTrickCards = computed(() => {
-  return last_trick.value || []
+  const trick = last_trick.value || []
+  // 对每名玩家的牌进行排序
+  return trick.map((item: any) => {
+    const cards = item.cards || (item.card ? [item.card] : [])
+    // 对牌进行排序（使用和sortedPlayedCards相同的逻辑）
+    const sortedCards = sortCards(cards)
+    return { ...item, cards: sortedCards }
+  })
 })
+
+// 对牌进行排序的函数（和PlayerArea中的sortedPlayedCards逻辑一致）
+function sortCards(cards: string[]): string[] {
+  if (!cards || cards.length === 0) return []
+  
+  // 解析卡牌字符串并排序
+  const parsed = cards.map(card => {
+    const parsed = parseCardString(card)
+    return { card, parsed }
+  }).filter(item => item.parsed !== null)
+  
+  // 简单排序：先按花色，再按点数
+  // 花色优先级：♠ > ♥ > ♣ > ♦
+  const suitPriority: Record<string, number> = { '♠': 4, '♥': 3, '♣': 2, '♦': 1 }
+  const rankPriority: Record<string, number> = {
+    '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+    '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14,
+    'JOKER-B': 15, 'JOKER-A': 16
+  }
+  
+  parsed.sort((a, b) => {
+    const aParsed = a.parsed!
+    const bParsed = b.parsed!
+    
+    // JOKER最大
+    if (aParsed.rank === 'JOKER-A' || aParsed.rank === 'JOKER-B') {
+      if (bParsed.rank !== 'JOKER-A' && bParsed.rank !== 'JOKER-B') return -1
+      if (aParsed.rank === 'JOKER-A' && bParsed.rank === 'JOKER-B') return -1
+      if (aParsed.rank === 'JOKER-B' && bParsed.rank === 'JOKER-A') return 1
+      return 0
+    }
+    if (bParsed.rank === 'JOKER-A' || bParsed.rank === 'JOKER-B') return 1
+    
+    // 先按花色排序
+    const aSuit = aParsed.suit || ''
+    const bSuit = bParsed.suit || ''
+    const suitDiff = (suitPriority[bSuit] || 0) - (suitPriority[aSuit] || 0)
+    if (suitDiff !== 0) return suitDiff
+    
+    // 再按点数排序（从大到小）
+    const aRank = rankPriority[aParsed.rank] || 0
+    const bRank = rankPriority[bParsed.rank] || 0
+    return bRank - aRank
+  })
+  
+  return parsed.map(item => item.card)
+}
 
 function openLastTrick() {
   showLastTrick.value = true
@@ -591,6 +671,16 @@ const isSelectingCard = computed(() => phase.value === 'playing' && isMyTurn.val
 const selectedCardIndicesForPlay = ref<number[]>([])
 const playingCard = ref(false)
 const playError = ref<string | null>(null)
+// 甩牌失败相关状态
+const slingshotFailedCards = ref<string[]>([])  // 甩牌失败的牌
+const slingshotFailedForcedCards = ref<string[]>([])  // 需要强制打出的牌
+const isHandlingSlingshotFailure = ref(false)  // 是否正在处理甩牌失败
+
+// 中央提示框状态
+const centerNotification = ref<{ show: boolean; message: string }>({
+  show: false,
+  message: ''
+})
 
 function toggleCardSelection(index: number) {
   if (!isSelectingCard.value) return
@@ -632,12 +722,69 @@ async function playCard() {
   
   playingCard.value = true
   playError.value = null
+  // 清空甩牌失败相关状态
+  slingshotFailedCards.value = []
+  slingshotFailedForcedCards.value = []
+  isHandlingSlingshotFailure.value = false
   try {
     ws.send({ type: 'play_card', cards: selectedCards.value })
     // 不清空选择，等待后端确认成功后再清空
   } catch (error) {
     playError.value = '出牌失败，请重试'
     playingCard.value = false
+  }
+}
+
+// 处理甩牌失败：将牌返回手牌（除了强制出的牌），然后自动打出强制出的牌
+function handleSlingshotFailure() {
+  if (!isHandlingSlingshotFailure.value) return
+  if (slingshotFailedCards.value.length === 0) return
+  
+  // 从current_trick中移除甩牌失败的牌
+  // 由于后端发送的card_played事件中包含了slingshot_failed标记的临时牌
+  // 我们需要从game store的current_trick中移除这些牌
+  if (game.current_trick && game.current_trick.length > 0) {
+    // 找到并移除甩牌失败的牌
+    const trickEntry = game.current_trick.find(
+      (entry: any) => entry.player_id === playerId.value && entry.slingshot_failed
+    )
+    if (trickEntry) {
+      // 从current_trick中移除这个条目
+      const index = game.current_trick.indexOf(trickEntry)
+      if (index >= 0) {
+        game.current_trick.splice(index, 1)
+      }
+    }
+  }
+  
+  // 将甩出的牌返回手牌（除了需要强制打出的牌）
+  // 注意：由于后端没有从手牌中移除这些牌（因为甩牌失败），所以实际上手牌中还有这些牌
+  // 我们只需要确保UI正确显示即可
+  
+  // 选择需要强制打出的牌
+  const forcedIndices: number[] = []
+  slingshotFailedForcedCards.value.forEach((forcedCard: string) => {
+    const idx = myHand.value.findIndex(card => card === forcedCard)
+    if (idx >= 0) {
+      forcedIndices.push(idx)
+    }
+  })
+  
+  if (forcedIndices.length > 0) {
+    // 自动选择强制出的牌
+    selectedCardIndicesForPlay.value = forcedIndices
+    // 清空错误信息
+    playError.value = null
+    // 自动打出
+    setTimeout(() => {
+      playCard()
+    }, 100)
+  } else {
+    // 如果没有强制出的牌，直接重置状态
+    slingshotFailedCards.value = []
+    slingshotFailedForcedCards.value = []
+    isHandlingSlingshotFailure.value = false
+    playError.value = null
   }
 }
 
@@ -1011,6 +1158,20 @@ onMounted(() => {
           playersCardsCount.value[myPosition.value] = myHand.value.length
         }
       }
+      // 更新当前轮次最大玩家（从snapshot中获取）
+      if (msg.current_trick_max_player_id && phase.value === 'playing' && !bottomPendingRef.value) {
+        // 优先使用snapshot中的名称
+        if (msg.current_trick_max_player_name) {
+          currentTrickMaxPlayer.value = msg.current_trick_max_player_name
+        } else {
+          const maxPlayer = players.value.find((p: any) => p.id === msg.current_trick_max_player_id)
+          if (maxPlayer && maxPlayer.name) {
+            currentTrickMaxPlayer.value = maxPlayer.name
+          }
+        }
+      } else if (!msg.current_trick_max_player_id) {
+        currentTrickMaxPlayer.value = null
+      }
       
       // 更新其他玩家的手牌数量（避免先清零造成闪烁）
       if (msg.players && Array.isArray(msg.players)) {
@@ -1051,23 +1212,91 @@ onMounted(() => {
       // 轮次结束时清空选择
       selectedCardIndicesForPlay.value = []
       playError.value = null
+      // 清空当前轮次最大玩家
+      currentTrickMaxPlayer.value = null
+      // 注意：applyTrickComplete已经在ws.ts中更新了current_trick
+      // 延迟2秒后清空current_trick（让玩家观察）
+      const trickCompleteTimeout = setTimeout(() => {
+        // 检查是否已经开始下一轮（如果current_trick已经被更新，说明下一轮已经开始）
+        if (game.current_trick && game.current_trick.length > 0) {
+          game.current_trick = []
+        }
+      }, 2000)
+      // 保存timeout ID以便在下一轮开始时清除
+      if (typeof window !== 'undefined') {
+        (window as any).__trickCompleteTimeout = trickCompleteTimeout
+      }
     } else if (msg.type === 'card_played') {
+      // 如果一轮完成（trick_complete为true），不清空current_trick，等待trick_complete事件处理
+      if (!msg.trick_complete) {
+        // 如果是新的一轮开始（领出），立即清空上一轮的牌
+        if (msg.current_trick && msg.current_trick.length === 1) {
+          // 清除之前的延迟清空定时器
+          if (typeof window !== 'undefined' && (window as any).__trickCompleteTimeout) {
+            clearTimeout((window as any).__trickCompleteTimeout)
+            delete (window as any).__trickCompleteTimeout
+          }
+          // 新的一轮开始，立即清空上一轮的牌
+          game.current_trick = []
+          // 重置当前轮次最大玩家
+          currentTrickMaxPlayer.value = null
+        } else if (msg.current_trick && msg.current_trick.length === 0) {
+          // 如果current_trick为空，说明后端已经清空，前端也应该清空
+          game.current_trick = []
+        }
+      }
+      
+      // 更新当前轮次最大玩家（仅在playing阶段且庄家已扣底后显示）
+      if (msg.current_trick_max_player && phase.value === 'playing' && !bottomPendingRef.value) {
+        currentTrickMaxPlayer.value = msg.current_trick_max_player
+      }
+      
+      // 如果是甩牌失败的情况，记录甩出的牌
+      if (msg.slingshot_failed && msg.player_id === playerId.value) {
+        slingshotFailedCards.value = msg.cards || []
+      }
+      
       // 出牌后，如果是自己出的牌，清空选择
       if (msg.player_id === playerId.value) {
-        selectedCardIndicesForPlay.value = []
-        playError.value = null
-        playingCard.value = false
+        // 如果不是甩牌失败，才清空选择
+        if (!msg.slingshot_failed) {
+          selectedCardIndicesForPlay.value = []
+          playError.value = null
+          playingCard.value = false
+        }
       }
       // GameStore的applyCardPlayed会自动更新current_player，这里不需要额外操作
       // 但为了确保UI立即响应，可以强制触发一次更新检查
+    } else if (msg.type === 'slingshot_failed_notification') {
+      // 显示甩牌失败提示（所有玩家都能看到）
+      centerNotification.value = {
+        show: true,
+        message: msg.message || '首家甩牌失败，强制出小'
+      }
+      // 1.5秒后隐藏
+      setTimeout(() => {
+        centerNotification.value.show = false
+      }, 1500)
     } else if (msg.type === 'error') {
       // 处理错误信息（出牌失败等）
       if (msg.message) {
         playError.value = msg.message
         playingCard.value = false
-        // 如果有forced_cards，可能需要处理甩牌失败的情况
-        if (msg.forced_cards && Array.isArray(msg.forced_cards)) {
-          // 甩牌失败，自动选择被强制出的牌
+        
+        // 如果是甩牌失败（有forced_cards和slingshot_failed标记）
+        if (msg.slingshot_failed && msg.forced_cards && Array.isArray(msg.forced_cards)) {
+          slingshotFailedForcedCards.value = msg.forced_cards
+          isHandlingSlingshotFailure.value = true
+          
+          // 显示"首家甩牌失败，强制出小"的提示
+          playError.value = '首家甩牌失败，强制出小'
+          
+          // 等待1.5秒后处理
+          setTimeout(() => {
+            handleSlingshotFailure()
+          }, 1500)
+        } else if (msg.forced_cards && Array.isArray(msg.forced_cards)) {
+          // 其他情况的forced_cards处理（保留原有逻辑）
           const forcedIndices: number[] = []
           msg.forced_cards.forEach((forcedCard: string) => {
             const idx = myHand.value.findIndex(card => card === forcedCard)

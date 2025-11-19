@@ -112,24 +112,40 @@ export const useGameStore = defineStore('game', {
       if (e.winner === 'NORTH' || e.winner === 'SOUTH') this.tricks_won.north_south += 1
       else this.tricks_won.east_west += 1
     },
-    applyCardPlayed(e: { current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; trick_complete?: boolean; current_player?: string }) {
-      if (Array.isArray(e.current_trick)) {
+    applyCardPlayed(e: { current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string; slingshot_failed?: boolean }>; trick_complete?: boolean; current_player?: string; slingshot_failed?: boolean }) {
+      // 如果一轮完成（trick_complete为true），不清空current_trick，让trick_complete事件处理
+      if (e.trick_complete) {
+        // 一轮完成，不清空current_trick，等待trick_complete事件更新
+        // 但需要更新current_trick以显示当前出牌
+        if (Array.isArray(e.current_trick)) {
+          this.current_trick = e.current_trick.map((item: any) => {
+            const mapped: any = {}
+            if (item.cards) {
+              mapped.cards = item.cards
+            } else if (item.card) {
+              mapped.cards = [item.card]
+            }
+            return { ...item, ...mapped }
+          })
+        }
+      } else if (Array.isArray(e.current_trick)) {
         // 兼容旧的card字段，转换为cards数组
         this.current_trick = e.current_trick.map((item: any) => {
+          const mapped: any = {}
           if (item.cards) {
-            return { ...item, cards: item.cards }
+            mapped.cards = item.cards
           } else if (item.card) {
-            return { ...item, cards: [item.card] }
+            mapped.cards = [item.card]
           }
-          return item
+          // 保留其他字段，包括slingshot_failed标记
+          return { ...item, ...mapped }
         })
       }
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player
       }
-      // 如果一轮完成，current_trick会被清空，但这里已经通过trick_complete事件处理
     },
-    applyTrickComplete(e: { last_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; tricks_won?: { north_south: number; east_west: number }; current_player?: string; idle_score?: number }) {
+    applyTrickComplete(e: { last_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; tricks_won?: { north_south: number; east_west: number }; current_player?: string; idle_score?: number }) {
       if (Array.isArray(e.last_trick)) {
         // 兼容旧的card字段，转换为cards数组
         this.last_trick = e.last_trick.map((item: any) => {
@@ -141,8 +157,20 @@ export const useGameStore = defineStore('game', {
           return item
         })
       }
-      // 清空当前轮次
-      this.current_trick = []
+      // 如果提供了current_trick，更新它（用于延迟显示）
+      // 注意：不清空current_trick，让前端延迟2秒后清空（在GameTable.vue中处理）
+      if (Array.isArray(e.current_trick)) {
+        // 兼容旧的card字段，转换为cards数组
+        this.current_trick = e.current_trick.map((item: any) => {
+          if (item.cards) {
+            return { ...item, cards: item.cards }
+          } else if (item.card) {
+            return { ...item, cards: [item.card] }
+          }
+          return item
+        })
+      }
+      // 如果没有提供current_trick，保持当前值不变（不清空）
       if (e.tricks_won) {
         this.tricks_won = e.tricks_won
       }

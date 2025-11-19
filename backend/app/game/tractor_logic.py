@@ -25,16 +25,14 @@ class TractorLogic:
         """检查是否为拖拉机（连对）"""
         if len(cards) < 4 or len(cards) % 2 != 0:
             return False
+    
         
-        # 按花色分组
-        suit_groups = self._group_by_suit(cards)
+        first_suit = cards[0].suit
+        if not all(card.suit == first_suit for card in cards):
+            return False
         
-        # 检查每个花色的牌是否构成拖拉机
-        for suit, suit_cards in suit_groups.items():
-            if self._is_suit_tractor(suit_cards):
-                return True
-        
-        return False
+        # 检查是否构成拖拉机
+        return self._is_suit_tractor(cards)
     
     def _group_by_suit(self, cards: List[Card]) -> Dict[Suit, List[Card]]:
         """按花色分组"""

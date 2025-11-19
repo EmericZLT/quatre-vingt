@@ -57,8 +57,8 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
     if room.is_full:
         raise HTTPException(status_code=400, detail="Room is full")
     
-    # Assign position based on current players
-    positions = [PlayerPosition.NORTH, PlayerPosition.SOUTH, PlayerPosition.EAST, PlayerPosition.WEST]
+    # Assign position based on current players (逆时针顺序：北-西-南-东)
+    positions = [PlayerPosition.NORTH, PlayerPosition.WEST, PlayerPosition.SOUTH, PlayerPosition.EAST]
     used_positions = {player.position for player in room.players}
     available_positions = [pos for pos in positions if pos not in used_positions]
     
