@@ -41,7 +41,7 @@ class SlingshotLogic:
         self.card_system = card_system
         self.trump_suit = trump_suit
         self.comparison = CardComparison(card_system, trump_suit)
-        self.tractor_logic = TractorLogic(card_system.current_level)
+        self.tractor_logic = TractorLogic(card_system.current_level, card_system, trump_suit)
     
     def validate_slingshot(self, cards: List[Card], player_hand: List[Card]) -> SlingshotResult:
         """
@@ -316,87 +316,174 @@ class SlingshotLogic:
         """
         将甩牌分解为拖拉机、对子、单牌（互不重叠）
         
+        使用与_is_tractor相同的逻辑来识别拖拉机，正确处理：
+        - 副牌：跳过级牌的特殊判断
+        - 主牌：大小王、主副级牌的特殊情况
+        
         Returns:
             (拖拉机列表, 对子列表, 单牌列表)
         """
+        from app.models.game import Rank
+        from collections import defaultdict
+        
         tractors = []
         pairs = []
         singles = []
         
-        # 统计每个rank的数量
-        rank_count = {}
-        rank_cards = {}
+        # 按花色分组（因为拖拉机必须同一花色）
+        suit_groups = defaultdict(list)
         for card in cards:
-            key = self._card_key(card)
-            rank_count[key] = rank_count.get(key, 0) + 1
-            if key not in rank_cards:
-                rank_cards[key] = []
-            rank_cards[key].append(card)
+            suit = self._get_card_suit(card)
+            suit_groups[suit].append(card)
         
-        # 标记已使用的牌
-        used_keys = set()
+        # 标记已使用的牌（使用列表，因为Card对象不可哈希）
+        used_cards = []
         
-        # 1. 先识别拖拉机（连续的对子链，至少2对）
-        sorted_keys = sorted(rank_count.keys(), key=lambda k: self.comparison._get_card_value(rank_cards[k][0]), reverse=True)
-        
-        i = 0
-        while i < len(sorted_keys):
-            key1 = sorted_keys[i]
-            if key1 in used_keys or rank_count[key1] < 2:
-                i += 1
-                continue
+        # 对每个花色分别处理
+        for suit, suit_cards in suit_groups.items():
+            # 统计该花色中每个key的数量
+            rank_count = {}
+            rank_cards = {}
+            for card in suit_cards:
+                key = self._card_key(card)
+                rank_count[key] = rank_count.get(key, 0) + 1
+                if key not in rank_cards:
+                    rank_cards[key] = []
+                rank_cards[key].append(card)
             
-            # 尝试构建连续的对子链（拖拉机）
-            tractor_chain = [key1]  # 从当前key开始
-            current_key = key1
-            current_card = rank_cards[key1][0]
+            # 获取该花色的所有对子
+            pair_keys = [key for key, count in rank_count.items() if count >= 2]
             
-            # 继续向后查找相邻的对子，构建完整的链
-            j = i + 1
-            while j < len(sorted_keys):
-                next_key = sorted_keys[j]
-                if next_key in used_keys or rank_count[next_key] < 2:
-                    j += 1
+            # 识别该花色中的拖拉机
+            used_keys = set()  # 跟踪已使用的key（字符串）
+            
+            # 特殊处理：大小王（主牌中的特殊情况）
+            if suit == "trump":
+                big_joker_cards = [c for c in suit_cards if c.is_joker and c.rank == Rank.BIG_JOKER]
+                small_joker_cards = [c for c in suit_cards if c.is_joker and c.rank == Rank.SMALL_JOKER]
+                
+                if len(big_joker_cards) >= 2 and len(small_joker_cards) >= 2:
+                    # 两张大王和两张小王可以构成连对
+                    joker_tractor = big_joker_cards[:2] + small_joker_cards[:2]
+                    tractors.append(joker_tractor)
+                    used_cards.extend(joker_tractor)
+                    # 标记大小王的key为已使用（避免后续重复计算）
+                    big_joker_key = self._card_key(big_joker_cards[0])
+                    small_joker_key = self._card_key(small_joker_cards[0])
+                    used_keys.add(big_joker_key)
+                    used_keys.add(small_joker_key)
+                    # 移除已使用的大小王
+                    big_joker_cards = big_joker_cards[2:]
+                    small_joker_cards = small_joker_cards[2:]
+                
+                # 剩余的大小王单独处理
+                if len(big_joker_cards) >= 2:
+                    pairs.append(big_joker_cards[:2])
+                    used_cards.extend(big_joker_cards[:2])
+                    # 标记大王key为已使用
+                    big_joker_key = self._card_key(big_joker_cards[0])
+                    used_keys.add(big_joker_key)
+                if len(small_joker_cards) >= 2:
+                    pairs.append(small_joker_cards[:2])
+                    used_cards.extend(small_joker_cards[:2])
+                    # 标记小王key为已使用
+                    small_joker_key = self._card_key(small_joker_cards[0])
+                    used_keys.add(small_joker_key)
+            
+            # 按大小排序对子（用于识别连续关系）
+            sorted_pair_keys = sorted(
+                pair_keys,
+                key=lambda k: self.comparison._get_card_value(rank_cards[k][0]),
+                reverse=True
+            )
+            i = 0
+            while i < len(sorted_pair_keys):
+                key1 = sorted_pair_keys[i]
+                if key1 in used_keys or rank_count[key1] < 2:
+                    i += 1
                     continue
                 
-                next_card = rank_cards[next_key][0]
+                card1 = rank_cards[key1][0]
                 
-                # 检查是否与链中的最后一个对子相邻
-                if self.tractor_logic._are_adjacent(current_card.rank, next_card.rank):
-                    # 添加到链中
-                    tractor_chain.append(next_key)
-                    current_key = next_key
-                    current_card = next_card
-                    j += 1
-                else:
-                    # 不再相邻，停止扩展链
-                    break
+                # 检查是否可以与后续对子构成拖拉机
+                tractor_chain = [key1]
+                current_card = card1
+                
+                j = i + 1
+                while j < len(sorted_pair_keys):
+                    key2 = sorted_pair_keys[j]
+                    if key2 in used_keys or rank_count[key2] < 2:
+                        j += 1
+                        continue
+                    
+                    card2 = rank_cards[key2][0]
+                    
+                    # 检查两个对子是否可以构成拖拉机的一部分
+                    if self._can_form_tractor_pair(current_card, card2):
+                        tractor_chain.append(key2)
+                        current_card = card2
+                        j += 1
+                    else:
+                        break
+                
+                # 如果链长度>=2对，形成一个完整的拖拉机
+                if len(tractor_chain) >= 2:
+                    tractor = []
+                    for key in tractor_chain:
+                        pair_cards = rank_cards[key][:2]
+                        tractor.extend(pair_cards)
+                        used_cards.extend(pair_cards)
+                        used_keys.add(key)
+                    tractors.append(tractor)
+                
+                i += 1
             
-            # 如果链长度>=2对，形成一个完整的拖拉机
-            if len(tractor_chain) >= 2:
-                # 构建拖拉机：将所有对子组合在一起
-                tractor = []
-                for key in tractor_chain:
-                    tractor.extend(rank_cards[key][:2])
-                tractors.append(tractor)
-                # 标记所有已使用的key
-                for key in tractor_chain:
+            # 识别该花色中剩余的对子
+            for key in sorted_pair_keys:
+                if key not in used_keys and rank_count[key] >= 2:
+                    pair_cards = rank_cards[key][:2]
+                    pairs.append(pair_cards)
+                    used_cards.extend(pair_cards)
                     used_keys.add(key)
             
-            i += 1
-        
-        # 2. 识别剩余的对子
-        for key in sorted_keys:
-            if key not in used_keys and rank_count[key] >= 2:
-                pairs.append(rank_cards[key][:2])
-                used_keys.add(key)
-        
-        # 3. 剩余的都是单牌
-        for key in sorted_keys:
-            if key not in used_keys:
-                singles.extend(rank_cards[key])
+            # 识别该花色中剩余的单牌
+            for card in suit_cards:
+                if card not in used_cards:
+                    singles.append(card)
+                    used_cards.append(card)
         
         return tractors, pairs, singles
+    
+    def _can_form_tractor_pair(self, card1: Card, card2: Card) -> bool:
+        """
+        检查两张牌（分别代表一个对子）是否可以构成拖拉机的一部分
+        
+        规则与_is_tractor相同：
+        1. 普通牌：使用_are_adjacent检查（可以跳过级牌）
+        2. 级牌：只有一对主级牌和一对副级牌可以构成连对
+        3. 级牌和普通牌不能混合
+        """
+        from app.models.game import Rank
+        
+        # 检查是否都是级牌
+        is_level1 = self.card_system.is_level_card(card1)
+        is_level2 = self.card_system.is_level_card(card2)
+        
+        if is_level1 and is_level2:
+            # 两个都是级牌
+            # 只有一对主级牌和一对副级牌可以构成连对
+            is_master1 = self.trump_suit and card1.suit == self.trump_suit
+            is_master2 = self.trump_suit and card2.suit == self.trump_suit
+            
+            # 必须是一个主级牌和一个副级牌
+            return (is_master1 and not is_master2) or (not is_master1 and is_master2)
+        
+        # 检查是否有级牌和普通牌混合（不允许）
+        if (is_level1 and not is_level2) or (not is_level1 and is_level2):
+            return False
+        
+        # 两个都是普通牌，使用_are_adjacent检查（可以跳过级牌）
+        return self.tractor_logic._are_adjacent(card1.rank, card2.rank)
     
     def _find_max_card_in_pairs(self, cards: List[Card]) -> Optional[Card]:
         """找出对子中的最大牌"""

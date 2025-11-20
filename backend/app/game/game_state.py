@@ -505,33 +505,11 @@ class GameState:
                             # 当前玩家的牌更大，更新最大玩家
                             self.current_trick_max_player_id = player_id
         
-        # 如果一轮出完（4个玩家都出完），判断获胜者
+        # 如果一轮出完（4个玩家都出完），处理一轮完成逻辑
         if len(self.current_trick_with_player) == 4:
-            winner = result.winner
+            winner = self._determine_trick_winner(result)
             if winner:
-                # 更新tricks_won
-                if winner in [PlayerPosition.NORTH, PlayerPosition.SOUTH]:
-                    self.tricks_won["north_south"] += 1
-                else:
-                    self.tricks_won["east_west"] += 1
-                
-                # 更新分数：从CardPlayingSystem获取闲家累计分数
-                if self.card_playing_system:
-                    self.idle_score = self.card_playing_system.get_idle_score()
-                
-                # 更新current_player为下一轮的领出者
-                self.current_player = winner
-            
-            # 保存上一轮出牌信息（在清空之前保存，用于前端延迟显示）
-            self.last_trick = self.current_trick_with_player.copy()
-            # 清空当前轮次（为下一轮准备）
-            # 注意：前端会延迟2秒清空显示，但后端需要立即清空以便下一轮使用
-            self.current_trick = []
-            # 注意：保留current_trick_with_player，让前端在trick_complete事件中获取
-            # 在websocket处理完trick_complete事件后再清空
-            # self.current_trick_with_player = []  # 延迟清空，在websocket中处理
-            self.trick_leader = None
-            self.current_trick_max_player_id = None  # 清空当前轮次最大玩家
+                self._handle_trick_completion(winner)
         else:
             # 如果还没完成一轮，更新current_player为下一个玩家（逆时针）
             # 无论是领出还是跟牌，都需要更新current_player
@@ -540,7 +518,14 @@ class GameState:
             next_idx = (current_idx + 1) % 4
             self.current_player = positions[next_idx]
         
-        return {"success": True, "message": result.message, "winner": result.winner}
+        # 如果一轮出完，winner已经在上面处理过了，这里返回None或者从current_trick_max_player_id获取
+        winner = None
+        if len(self.current_trick_with_player) == 4 and self.current_trick_max_player_id:
+            winner_player = self.get_player_by_id(self.current_trick_max_player_id)
+            if winner_player:
+                winner = winner_player.position
+        
+        return {"success": True, "message": result.message, "winner": winner}
     
     def determine_trick_winner(self) -> str:
         """判断一圈的获胜者"""
@@ -781,6 +766,22 @@ class GameState:
                 result.append(player.id)
         return result
     
+    def _calculate_trick_points_from_current_trick(self) -> int:
+        """从current_trick_with_player计算当墩分数"""
+        from app.models.game import Rank
+        points = 0
+        for entry in self.current_trick_with_player:
+            for card_str in entry["cards"]:
+                card = self._parse_card_string(card_str)
+                if card and not card.is_joker:
+                    if card.rank == Rank.FIVE:
+                        points += 5
+                    elif card.rank == Rank.TEN:
+                        points += 10
+                    elif card.rank == Rank.KING:
+                        points += 10
+        return points
+    
     def _parse_card_string(self, card_str: str) -> Optional[Card]:
         """解析卡牌字符串为Card对象"""
         from app.models.game import Card, Rank, Suit
@@ -798,4 +799,129 @@ class GameState:
                 return Card(rank=rank, suit=suit)
         except:
             return None
+    
+    def _determine_trick_winner(self, result) -> Optional[PlayerPosition]:
+        """
+        确定一轮的获胜者
+        直接使用已经比较好的current_trick_max_player_id，不需要重新计算
+        
+        Args:
+            result: CardPlayingSystem返回的PlayResult
+            
+        Returns:
+            获胜者的位置，如果无法确定则返回None
+        """
+        if self.current_trick_max_player_id:
+            winner_player = self.get_player_by_id(self.current_trick_max_player_id)
+            if winner_player:
+                return winner_player.position
+        
+        # 兜底：如果current_trick_max_player_id未设置或找不到玩家，使用result.winner或trick_leader
+        return result.winner if result.winner else self.trick_leader
+    
+    def _handle_trick_completion(self, winner: PlayerPosition) -> None:
+        """
+        处理一轮完成后的所有逻辑
+        
+        Args:
+            winner: 获胜者的位置
+        """
+        self._update_tricks_won(winner)
+        self._calculate_and_update_score(winner)
+        self._update_next_round_leader(winner)
+        self._save_and_reset_trick()
+    
+    def _update_tricks_won(self, winner: PlayerPosition) -> None:
+        """更新获胜墩数"""
+        if winner in [PlayerPosition.NORTH, PlayerPosition.SOUTH]:
+            self.tricks_won["north_south"] += 1
+        else:
+            self.tricks_won["east_west"] += 1
+    
+    def _calculate_and_update_score(self, winner: PlayerPosition) -> None:
+        """计算并更新分数"""
+        if not self.card_playing_system:
+            return
+        
+        # 设置expected_leader为下一轮的领出者
+        self.card_playing_system.expected_leader = winner
+        
+        # 计算当墩分数
+        trick_points = self._calculate_trick_points_from_current_trick()
+        if winner in self.card_playing_system.idle_positions:
+            self.card_playing_system.idle_score += trick_points
+            # 处理抠底机制
+            self._handle_bottom_bonus(winner)
+        
+        # 更新分数：从CardPlayingSystem获取闲家累计分数
+        self.idle_score = self.card_playing_system.get_idle_score()
+    
+    def _handle_bottom_bonus(self, winner: PlayerPosition) -> None:
+        """
+        处理抠底机制，只发生在最后一墩
+        
+        Args:
+            winner: 获胜者的位置
+        """
+        all_hands_empty = all(len(p.cards) == 0 for p in self.room.players)
+        if not all_hands_empty or not self.card_playing_system.bottom_cards:
+            return
+        
+        bottom_score = sum(self.card_system.get_card_score(card) 
+                         for card in self.card_playing_system.bottom_cards)
+        
+        # 使用领出者的牌型判断倍率
+        led_cards = self._get_led_cards_from_current_trick()
+        if led_cards:
+            multiplier = self.card_playing_system._get_last_trick_multiplier(led_cards)
+            bonus = bottom_score * multiplier
+            if bonus:
+                self.card_playing_system.idle_score += bonus
+                print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
+    
+    def _get_led_cards_from_current_trick(self) -> List[Card]:
+        """从current_trick_with_player获取领出者的牌"""
+        if not self.current_trick_with_player:
+            return []
+        
+        led_entry = self.current_trick_with_player[0]
+        led_cards = []
+        for card_str in led_entry["cards"]:
+            parsed = self._parse_card_string(card_str)
+            if parsed:
+                led_cards.append(parsed)
+        return led_cards
+    
+    def _update_next_round_leader(self, winner: PlayerPosition) -> None:
+        """更新下一轮的领出者"""
+        self.current_player = winner
+    
+    def _save_and_reset_trick(self) -> None:
+        """保存上一轮出牌信息并重置当前轮次状态"""
+        # 保存上一轮出牌信息（在清空之前保存，用于前端延迟显示）
+        self.last_trick = self.current_trick_with_player.copy()
+        # 清空当前轮次（为下一轮准备）
+        # 注意：前端会延迟2秒清空显示，但后端需要立即清空以便下一轮使用
+        self.current_trick = []
+        # 注意：保留current_trick_with_player，让前端在trick_complete事件中获取
+        # 在websocket处理完trick_complete事件后再清空
+        # self.current_trick_with_player = []  # 延迟清空，在websocket中处理
+        self.trick_leader = None
+        self.current_trick_max_player_id = None  # 清空当前轮次最大玩家
+    
+    def _calculate_trick_points_from_current_trick(self) -> int:
+        """从current_trick_with_player计算当墩分数"""
+        from app.models.game import Rank
+        points = 0
+        for entry in self.current_trick_with_player:
+            for card_str in entry["cards"]:
+                card = self._parse_card_string(card_str)
+                if card and not card.is_joker:
+                    if card.rank == Rank.FIVE:
+                        points += 5
+                    elif card.rank == Rank.TEN:
+                        points += 10
+                    elif card.rank == Rank.KING:
+                        points += 10
+        return points
     

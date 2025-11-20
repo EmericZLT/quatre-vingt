@@ -1,16 +1,19 @@
 """
 拖拉机（连对）逻辑系统
 """
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 from app.models.game import Card, Rank, Suit
+from app.game.card_system import CardSystem
 
 
 class TractorLogic:
     """拖拉机逻辑处理"""
     
-    def __init__(self, current_level: int):
+    def __init__(self, current_level: int, card_system: Optional[CardSystem] = None, trump_suit: Optional[Suit] = None):
         self.current_level = current_level
         self.level_rank = self._get_level_rank()
+        self.card_system = card_system
+        self.trump_suit = trump_suit
     
     def _get_level_rank(self) -> Rank:
         """获取当前级别的牌面"""
@@ -22,17 +25,109 @@ class TractorLogic:
         return level_ranks[self.current_level]
     
     def is_tractor(self, cards: List[Card]) -> bool:
-        """检查是否为拖拉机（连对）"""
+        """
+        检查是否为拖拉机（连对）
+        
+        规则：
+        1. 必须是连续的对子，例如9988是连对，9966不是
+        2. 连续可以跳过级牌，例如级牌为10时，JJ99是连对，QQJJ99也是连对
+        3. 级牌不能和普通牌构成连对，例如101099不是连对
+        4. 级牌只能一对主级牌和一对副级牌构成连对
+        5. 两对都是副级牌的对子不能构成连对（因为没有大小关系）
+        6. 特殊：两张大王和两张小王一起出也是连对
+        """
         if len(cards) < 4 or len(cards) % 2 != 0:
             return False
-    
         
+        if not cards:
+            return False
+        
+        # 特殊规则：两张大王和两张小王一起出也是连对
+        all_jokers = all(card.is_joker for card in cards)
+        if all_jokers and len(cards) == 4:
+            # 检查是否正好是两张大王和两张小王
+            big_joker_count = sum(1 for card in cards if card.rank == Rank.BIG_JOKER)
+            small_joker_count = sum(1 for card in cards if card.rank == Rank.SMALL_JOKER)
+            if big_joker_count == 2 and small_joker_count == 2:
+                return True
+        
+        # 拖拉机必须属于同一花色
         first_suit = cards[0].suit
         if not all(card.suit == first_suit for card in cards):
             return False
         
-        # 检查是否构成拖拉机
-        return self._is_suit_tractor(cards)
+        # 将牌分成对子
+        pairs = [cards[i:i+2] for i in range(0, len(cards), 2)]
+        
+        # 检查每对是否是对子
+        for pair in pairs:
+            if not self._is_pair(pair):
+                return False
+        
+        # 提取每对的rank（用于判断是否连续）
+        pair_ranks = []
+        pair_is_level = []
+        pair_is_master_level = []
+        
+        for pair in pairs:
+            rank = pair[0].rank
+            is_level = False
+            is_master_level = False
+            
+            if self.card_system:
+                is_level = self.card_system.is_level_card(pair[0])
+                if is_level:
+                    # 判断是否为主级牌（主牌花色的级牌）
+                    if self.trump_suit and pair[0].suit == self.trump_suit:
+                        is_master_level = True
+            
+            pair_ranks.append(rank)
+            pair_is_level.append(is_level)
+            pair_is_master_level.append(is_master_level)
+        
+        # 检查是否连续
+        # 如果所有对子都是级牌，需要特殊处理
+        all_level_pairs = all(pair_is_level)
+        
+        if all_level_pairs:
+            # 所有对子都是级牌
+            if len(pairs) == 2:
+                # 只有两对级牌时，检查是否是一对主级牌和一对副级牌
+                master_level_count = sum(pair_is_master_level)
+                if master_level_count == 1:
+                    # 一对主级牌和一对副级牌，可以构成连对
+                    return True
+                else:
+                    # 两对都是副级牌或其他情况，不能构成连对
+                    return False
+            else:
+                # 超过两对的级牌对子，不能构成连对（因为副级牌之间没有大小关系）
+                return False
+        
+        # 检查是否有级牌和普通牌混合（不允许）
+        has_level = any(pair_is_level)
+        has_non_level = any(not is_level for is_level in pair_is_level)
+        if has_level and has_non_level:
+            # 级牌和普通牌混合，不能构成连对
+            return False
+        
+        # 所有对子都是普通牌，检查是否连续（可以跳过级牌）
+        # 使用_are_adjacent方法检查相邻关系
+        for i in range(len(pair_ranks) - 1):
+            rank1 = pair_ranks[i]
+            rank2 = pair_ranks[i + 1]
+            
+            # 检查是否相邻（会考虑级牌的特殊规则，允许跳过级牌）
+            if not self._are_adjacent(rank1, rank2):
+                return False
+        
+        return True
+    
+    def _is_pair(self, cards: List[Card]) -> bool:
+        """检查是否为对子"""
+        if len(cards) != 2:
+            return False
+        return cards[0].rank == cards[1].rank and cards[0].suit == cards[1].suit
     
     def _group_by_suit(self, cards: List[Card]) -> Dict[Suit, List[Card]]:
         """按花色分组"""
@@ -44,15 +139,11 @@ class TractorLogic:
         return groups
     
     def _is_suit_tractor(self, cards: List[Card]) -> bool:
-        """检查某花色是否为拖拉机"""
-        if len(cards) < 4 or len(cards) % 2 != 0:
-            return False
-        
-        # 按牌面分组
-        rank_groups = self._group_by_rank(cards)
-        
-        # 检查是否有连续的对子
-        return self._has_consecutive_pairs(rank_groups)
+        """
+        检查某花色是否为拖拉机（已废弃，使用is_tractor代替）
+        保留此方法以保持向后兼容
+        """
+        return self.is_tractor(cards)
     
     def _group_by_rank(self, cards: List[Card]) -> Dict[Rank, List[Card]]:
         """按牌面分组"""

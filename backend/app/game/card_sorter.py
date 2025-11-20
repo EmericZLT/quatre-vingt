@@ -58,7 +58,10 @@ class CardSorter:
         1. 左侧（主牌部分）：大王 → 小王 → 级牌（主牌花色级牌 → 其它级牌，顺序与副牌顺序一致）
         2. 右侧（副牌部分）：
            - 定主后：主牌花色的非级牌移到副牌最左侧（从大到小）
-           - 其他副牌：♠ → ♥ → ♣ → ♦/特殊：梅花为主时♥ → ♠ → ♦
+           - 其他副牌：♠ → ♥ → ♣ → ♦
+           - 特殊规则：
+             * 梅花为主时：♥ → ♠ → ♦
+             * 红心为主时：♠ → ♦ → ♣
            - 相同花色从大到小排序
         """
         if not cards:
@@ -221,12 +224,17 @@ class CardSorter:
     def _get_plain_suit_order(self) -> List[Suit]:
         """
         获取副牌的花色顺序
-        特殊规则：如果梅花为主牌，黑桃排到红心后面（避免同色混淆）
+        特殊规则：
+        1. 如果梅花为主牌，黑桃排到红心后面（避免同色混淆）：♥ → ♠ → ♦
+        2. 如果红心为主牌，副牌顺序为：♠ → ♦ → ♣
         """
         if self.trump_suit == Suit.CLUBS:
             # 梅花为主牌时：♠ → ♥ → ♣（主牌）→ ♦，但为了避免同色，调整为：♥ → ♠ → ♦
             # 注意：这里返回的是非主牌花色的顺序，主牌花色已经在前面了
             return [Suit.HEARTS, Suit.SPADES, Suit.DIAMONDS]
+        elif self.trump_suit == Suit.HEARTS:
+            # 红心为主牌时，副牌顺序为：♠ → ♦ → ♣
+            return [Suit.SPADES, Suit.DIAMONDS, Suit.CLUBS]
         else:
             # 正常顺序：♠ → ♥ → ♣ → ♦（主牌花色会被排除）
             normal_order = [Suit.SPADES, Suit.HEARTS, Suit.CLUBS, Suit.DIAMONDS]

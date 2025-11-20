@@ -50,7 +50,7 @@ class CardPlayingSystem:
         
         # 初始化子系统
         self.card_comparison = CardComparison(card_system, trump_suit)
-        self.tractor_logic = TractorLogic(card_system.current_level)
+        self.tractor_logic = TractorLogic(card_system.current_level, card_system, trump_suit)
         self.trump_logic = TrumpLogic(self.card_comparison, self.tractor_logic)
         self.slingshot_logic = SlingshotLogic(card_system, trump_suit)
     
@@ -134,7 +134,7 @@ class CardPlayingSystem:
         # 检查其他玩家能否管上甩牌
         if self.all_players_hands:
             slingshot_suit = self.slingshot_logic._get_card_suit(cards[0])
-            all_challenge_cards = []
+            all_challenge_cards = []  # 每个元素是一个玩家的挑战牌列表
             
             for other_player, other_hand in self.all_players_hands.items():
                 if other_player == player:
@@ -144,7 +144,7 @@ class CardPlayingSystem:
                     cards, other_hand, slingshot_suit
                 )
                 if can_challenge:
-                    all_challenge_cards.extend(challenge_cards)
+                    all_challenge_cards.append(challenge_cards)  # 使用append而不是extend，保持每个玩家的牌独立
             
             if all_challenge_cards:
                 # 甩牌失败，找出被管上的最小牌
@@ -180,28 +180,12 @@ class CardPlayingSystem:
         # 添加到当前圈
         self.current_trick.append((player, cards))
         
-        # 如果一圈出完，判断获胜者
+        # 如果一圈出完，重置trick
+        # 注意：获胜者的判断由GameState通过current_trick_max_player_id处理，不需要在这里重新计算
+        # winner设为None，由GameState根据current_trick_max_player_id确定
         if len(self.current_trick) == 4:
-            winner = self._determine_trick_winner()
-            # 设置下一墩应由赢家领出
-            self.expected_leader = winner
-            # 结算当墩分数：仅当赢家为闲家时累计
-            if winner in self.idle_positions:
-                trick_points = self._calculate_trick_points(self.current_trick)
-                self.idle_score += trick_points
-                # 抠底机制，只发生在最后一墩
-                all_hands_empty = all(len(h) == 0 for h in self.all_players_hands.values())
-                if all_hands_empty and self.bottom_cards:
-                    bottom_score = self._get_bottom_score()
-                    # 使用领出者的牌型判断倍率
-                    led_cards_for_multiplier = self.led_cards if self.led_cards else cards
-                    multiplier = self._get_last_trick_multiplier(led_cards_for_multiplier)
-                    bonus = bottom_score * multiplier
-                    if bonus:
-                        self.idle_score += bonus
-                        print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
             self._reset_trick()
-            return PlayResult(True, "跟牌成功", winner)
+            return PlayResult(True, "跟牌成功", None)
         
         return PlayResult(True, "跟牌成功")
     
@@ -259,10 +243,12 @@ class CardPlayingSystem:
             # 检查手中是否有该花色的对子
             same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
             
-            # 按rank分组检查是否有对子
+            # 检查是否有真正的对子（必须相同rank和相同suit）
             from collections import Counter
-            rank_counts = Counter([c.rank for c in same_suit_cards])
-            has_pair = any(count >= 2 for count in rank_counts.values())
+            # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
+            card_keys = [(c.rank, c.suit) for c in same_suit_cards]
+            key_counts = Counter(card_keys)
+            has_pair = any(count >= 2 for count in key_counts.values())
             
             if has_pair:
                 return PlayResult(False, "有该花色对子必须出对子")
@@ -377,12 +363,15 @@ class CardPlayingSystem:
                             return PlayResult(False, f"对子不足时必须将所有对子出完（手中有{hand_total_pairs}个对子，只出了{follow_total_pairs}个）")
                 
                 # 检查是否将对子拆成了单张
-                hand_rank_counts = Counter([c.rank for c in same_suit_cards])
-                follow_rank_counts = Counter([c.rank for c in same_suit_in_cards])
-                for rank, count in hand_rank_counts.items():
-                    if count >= 2:  # 手中有这个rank的对子
-                        follow_count = follow_rank_counts.get(rank, 0)
-                        # 如果手中有对子，但跟的牌中这个rank只有1张，说明拆了对子，这是不允许的
+                # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
+                hand_card_keys = [(c.rank, c.suit) for c in same_suit_cards]
+                follow_card_keys = [(c.rank, c.suit) for c in same_suit_in_cards]
+                hand_key_counts = Counter(hand_card_keys)
+                follow_key_counts = Counter(follow_card_keys)
+                for (rank, suit), count in hand_key_counts.items():
+                    if count >= 2:  # 手中有这个(rank, suit)的对子
+                        follow_count = follow_key_counts.get((rank, suit), 0)
+                        # 如果手中有对子，但跟的牌中这个(rank, suit)只有1张，说明拆了对子，这是不允许的
                         if follow_count == 1:
                             return PlayResult(False, "有该花色对子必须出对子，不能拆成单张")
         
@@ -474,13 +463,16 @@ class CardPlayingSystem:
                     ]
                 
                 # 计算剩余牌中的对子数
-                from collections import Counter
-                remaining_follow_rank_counts = Counter([c.rank for c in remaining_follow_cards])
-                remaining_pairs_in_follow = sum(1 for count in remaining_follow_rank_counts.values() if count >= 2)
+                    from collections import Counter
+                # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
+                remaining_follow_card_keys = [(c.rank, c.suit) for c in remaining_follow_cards]
+                remaining_follow_key_counts = Counter(remaining_follow_card_keys)
+                remaining_pairs_in_follow = sum(1 for count in remaining_follow_key_counts.values() if count >= 2)
                 
                 # 计算手牌中的对子数（不包括已出的拖拉机中的对子）
-                hand_rank_counts = Counter([c.rank for c in same_suit_cards])
-                pairs_in_hand = sum(1 for count in hand_rank_counts.values() if count >= 2)
+                hand_card_keys = [(c.rank, c.suit) for c in same_suit_cards]
+                hand_key_counts = Counter(hand_card_keys)
+                pairs_in_hand = sum(1 for count in hand_key_counts.values() if count >= 2)
                 
                 # 计算需要出的对子数
                 # 如果跟出方没有拖拉机，需要将对子数量要求增加领出方拖拉机包含的对子数
@@ -501,10 +493,10 @@ class CardPlayingSystem:
                         return PlayResult(False, f"对子不足时必须将所有对子出完（手中有{pairs_in_hand}个对子，只出了{remaining_pairs_in_follow}个）")
                 
                 # 4. 检查是否将对子拆成了单张
-                for rank, count in hand_rank_counts.items():
-                    if count >= 2:  # 手中有这个rank的对子
-                        follow_count = remaining_follow_rank_counts.get(rank, 0)
-                        # 如果手中有对子，但跟的牌中这个rank只有1张，说明拆了对子，这是不允许的
+                for (rank, suit), count in hand_key_counts.items():
+                    if count >= 2:  # 手中有这个(rank, suit)的对子
+                        follow_count = remaining_follow_key_counts.get((rank, suit), 0)
+                        # 如果手中有对子，但跟的牌中这个(rank, suit)只有1张，说明拆了对子，这是不允许的
                         if follow_count == 1:
                             return PlayResult(False, "有该花色对子必须出对子，不能拆成单张")
         
@@ -518,7 +510,7 @@ class CardPlayingSystem:
             if self._is_pair(cards):
                 return CardType.PAIR
         elif len(cards) > 2:
-            if self._is_tractor(cards):
+            if self.tractor_logic.is_tractor(cards):
                 return CardType.TRACTOR
             elif self._is_slingshot(cards):
                 return CardType.SLINGSHOT
@@ -532,24 +524,6 @@ class CardPlayingSystem:
         
         card1, card2 = cards
         return (card1.rank == card2.rank and card1.suit == card2.suit)
-    
-    def _is_tractor(self, cards: List[Card]) -> bool:
-        """检查是否为拖拉机（连对）"""
-        if len(cards) < 4 or len(cards) % 2 != 0:
-            return False
-        
-        # 简化版本：检查是否为连续的对子
-        # 实际应该根据当前级牌判断相邻关系
-        pairs = [cards[i:i+2] for i in range(0, len(cards), 2)]
-        
-        # 检查每对是否是对子
-        for pair in pairs:
-            if not self._is_pair(pair):
-                return False
-        
-        # 检查是否连续（简化版本）
-        # 实际应该根据级牌判断相邻关系
-        return True
     
     def _is_slingshot(self, cards: List[Card]) -> bool:
         """检查是否为甩牌"""
@@ -565,101 +539,38 @@ class CardPlayingSystem:
         """
         判断一圈的获胜者
         
+        使用compare_cards_in_trick的逻辑来比较所有玩家的牌，
+        而不是重新实现一套逻辑。这样可以确保逻辑一致性。
+        
         Returns:
             获胜的玩家位置
         """
         if len(self.current_trick) != 4:
             return self.trick_leader
         
-        # 获取所有出牌
+        # 获取所有出牌和玩家
         all_cards = [cards for _, cards in self.current_trick]
         players = [player for player, _ in self.current_trick]
         
-        # 获取领出的花色类型
-        led_suit_str = self.slingshot_logic._get_card_suit(self.led_cards[0])
+        # 使用compare_cards_in_trick的逻辑，逐个比较所有玩家的牌
+        # 从领出者开始，依次与后续玩家比较
+        winner_idx = 0
+        winner_cards = all_cards[0]
+        winner_player = players[0]
         
-        # 分类：主牌和副牌
-        trump_players = []
-        led_suit_players = []
-        other_players = []
+        for i in range(1, len(all_cards)):
+            cards = all_cards[i]
+            # 使用compare_cards_in_trick比较当前玩家的牌是否比当前获胜者更大
+            if self.compare_cards_in_trick(cards, winner_cards):
+                winner_idx = i
+                winner_cards = cards
+                winner_player = players[i]
         
-        for i, cards in enumerate(all_cards):
-            # 检查这组牌是否全是同花色（领出的花色）
-            all_led_suit = all(self.slingshot_logic._get_card_suit(c) == led_suit_str for c in cards)
-            # 检查这组牌是否全是主牌
-            all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards)
-            
-            if all_led_suit:
-                # 全是同花色（正常跟牌）
-                led_suit_players.append((i, cards, players[i]))
-            elif all_trump and led_suit_str != "trump":
-                # 全是主牌且领出的不是主牌（将吃）
-                trump_players.append((i, cards, players[i]))
-            else:
-                # 其他情况：
-                # - 混合花色（有主牌有副牌）
-                # - 全是其他副牌
-                # 这些都不参与比较（垫牌或无效跟牌）
-                other_players.append((i, cards, players[i]))
-        
-        # 1. 如果有将吃，需要检查牌型是否匹配
-        if trump_players:
-            # 分析领出的牌型
-            led_analysis = self.slingshot_logic._analyze_card_types(self.led_cards)
-            led_pair_count = led_analysis["pair_count"]
-            led_tractor_count = led_analysis["tractor_count"]
-            
-            # 筛选出牌型匹配的将吃玩家
-            valid_trump_players = []
-            for i, cards, player in trump_players:
-                # 分析将吃的牌型
-                trump_analysis = self.slingshot_logic._analyze_card_types(cards)
-                trump_pair_count = trump_analysis["pair_count"]
-                trump_tractor_count = trump_analysis["tractor_count"]
-                
-                # 检查牌型是否匹配
-                # 将吃必须有至少相同数量的对子和拖拉机
-                if trump_pair_count >= led_pair_count and trump_tractor_count >= led_tractor_count:
-                    valid_trump_players.append((i, cards, player))
-            
-            # 如果有牌型匹配的将吃，比较主牌
-            if valid_trump_players:
-                # 根据甩牌的牌型决定比较方式
-                if led_tractor_count > 0:
-                    # 1. 甩牌有拖拉机：比较拖拉机大小
-                    return self._compare_trump_by_tractor(valid_trump_players)
-                elif led_pair_count > 0:
-                    # 2. 甩牌有对子（无拖拉机）：比较对子大小
-                    return self._compare_trump_by_pair(valid_trump_players)
-                else:
-                    # 3. 甩牌全是单牌：比较最大单牌，相同则先出牌者获胜
-                    return self._compare_trump_by_single(valid_trump_players)
-            # 如果没有牌型匹配的将吃，将吃无效，继续比较同花色
-        
-        # 2. 如果没有将吃，比较同花色的牌
-        if led_suit_players:
-            winner_idx, winner_cards, winner_player = led_suit_players[0]
-            
-            for i, cards, player in led_suit_players[1:]:
-                # 比较每组牌中最大的牌
-                max_card1 = max(winner_cards, key=lambda c: self.card_comparison._get_card_value(c))
-                max_card2 = max(cards, key=lambda c: self.card_comparison._get_card_value(c))
-                
-                if self.card_comparison.compare_cards(max_card2, max_card1) > 0:
-                    winner_idx = i
-                    winner_cards = cards
-                    winner_player = player
-            
-            return winner_player
-        
-        # 默认返回领出者
-        return self.trick_leader
+        return winner_player
     
     def compare_cards_in_trick(self, cards1: List[Card], cards2: List[Card]) -> bool:
         """
-        比较两组牌在当前轮次中的大小（直接复用_determine_trick_winner的逻辑）
-        
-        本质上是模拟_determine_trick_winner中比较两组牌的过程
+        比较两组牌在当前轮次中的大小
         
         Args:
             cards1: 第一组牌
@@ -671,23 +582,23 @@ class CardPlayingSystem:
         if not cards1 or not cards2 or not self.led_cards:
             return False
         
-        # 获取领出的花色类型（复用_determine_trick_winner的逻辑）
+        # 获取领出的花色类型
         led_suit_str = self.slingshot_logic._get_card_suit(self.led_cards[0])
         
-        # 分类：主牌和副牌（复用_determine_trick_winner的逻辑）
+        # 分类：主牌和副牌
         cards1_all_led_suit = all(self.slingshot_logic._get_card_suit(c) == led_suit_str for c in cards1)
         cards2_all_led_suit = all(self.slingshot_logic._get_card_suit(c) == led_suit_str for c in cards2)
         cards1_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards1)
         cards2_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards2)
         
-        # 1. 如果有将吃，需要检查牌型是否匹配（复用_determine_trick_winner的逻辑）
+        # 1. 如果有将吃，需要检查牌型是否匹配
         if cards1_all_trump and cards2_all_trump and led_suit_str != "trump":
             # 分析领出的牌型
             led_analysis = self.slingshot_logic._analyze_card_types(self.led_cards)
             led_pair_count = led_analysis["pair_count"]
             led_tractor_count = led_analysis["tractor_count"]
             
-            # 筛选出牌型匹配的将吃玩家（复用_determine_trick_winner的逻辑）
+            # 筛选出牌型匹配的将吃玩家
             cards1_analysis = self.slingshot_logic._analyze_card_types(cards1)
             cards2_analysis = self.slingshot_logic._analyze_card_types(cards2)
             cards1_pair_count = cards1_analysis["pair_count"]
@@ -695,7 +606,7 @@ class CardPlayingSystem:
             cards1_tractor_count = cards1_analysis["tractor_count"]
             cards2_tractor_count = cards2_analysis["tractor_count"]
             
-            # 检查牌型是否匹配（复用_determine_trick_winner的逻辑）
+            # 检查牌型是否匹配
             cards1_valid = cards1_pair_count >= led_pair_count and cards1_tractor_count >= led_tractor_count
             cards2_valid = cards2_pair_count >= led_pair_count and cards2_tractor_count >= led_tractor_count
             
@@ -704,7 +615,7 @@ class CardPlayingSystem:
             if not cards2_valid:
                 return True
             
-            # 如果有牌型匹配的将吃，比较主牌（复用_determine_trick_winner的逻辑）
+            # 如果有牌型匹配的将吃，比较主牌
             if led_tractor_count > 0:
                 # 1. 甩牌有拖拉机：比较拖拉机大小
                 max1 = self._get_max_tractor_card(cards1)
@@ -721,7 +632,7 @@ class CardPlayingSystem:
                 max2 = max(cards2, key=lambda c: self.card_comparison._get_card_value(c))
                 return self.card_comparison.compare_cards(max1, max2) > 0
         
-        # 2. 如果没有将吃，比较同花色的牌（复用_determine_trick_winner的逻辑）
+        # 2. 如果没有将吃，比较同花色的牌
         if cards1_all_led_suit and cards2_all_led_suit:
             # 分析领出的牌型
             led_analysis = self.slingshot_logic._analyze_card_types(self.led_cards)
@@ -756,7 +667,7 @@ class CardPlayingSystem:
                     max2 = self._get_max_pair_card(cards2)
                     return self.card_comparison.compare_cards(max1, max2) > 0 if max1 and max2 else False
             
-            # 都是单牌或没有对子/拖拉机，直接比较最大牌（复用_determine_trick_winner的逻辑）
+            # 都是单牌或没有对子/拖拉机，直接比较最大牌
             max_card1 = max(cards1, key=lambda c: self.card_comparison._get_card_value(c))
             max_card2 = max(cards2, key=lambda c: self.card_comparison._get_card_value(c))
             return self.card_comparison.compare_cards(max_card2, max_card1) > 0
@@ -860,10 +771,11 @@ class CardPlayingSystem:
         """
         from collections import Counter
         
-        # 按rank分组，找出对子
-        rank_counts = Counter([c.rank for c in cards])
-        pairs = [(rank, cards_list) for rank, cards_list in 
-                 [(rank, [c for c in cards if c.rank == rank]) for rank in rank_counts.keys()]
+        # 按(rank, suit)分组，找出真正的对子（不同花色的级牌不是对子）
+        card_keys = [(c.rank, c.suit) for c in cards]
+        key_counts = Counter(card_keys)
+        pairs = [(key, cards_list) for key, cards_list in 
+                 [(key, [c for c in cards if (c.rank, c.suit) == key]) for key in key_counts.keys()]
                  if len(cards_list) >= 2]
         
         if not pairs:
@@ -871,7 +783,7 @@ class CardPlayingSystem:
             return max(cards, key=lambda c: self.card_comparison._get_card_value(c))
         
         # 找出对子中最大的牌
-        max_pair_rank, max_pair_cards = max(pairs, key=lambda p: self.card_comparison._get_card_value(p[1][0]))
+        max_pair_key, max_pair_cards = max(pairs, key=lambda p: self.card_comparison._get_card_value(p[1][0]))
         return max_pair_cards[0]
     
     def _get_max_pair_card(self, cards: List[Card]) -> Card:
@@ -886,10 +798,11 @@ class CardPlayingSystem:
         """
         from collections import Counter
         
-        # 按rank分组，找出对子
-        rank_counts = Counter([c.rank for c in cards])
-        pairs = [(rank, cards_list) for rank, cards_list in 
-                 [(rank, [c for c in cards if c.rank == rank]) for rank in rank_counts.keys()]
+        # 按(rank, suit)分组，找出真正的对子（不同花色的级牌不是对子）
+        card_keys = [(c.rank, c.suit) for c in cards]
+        key_counts = Counter(card_keys)
+        pairs = [(key, cards_list) for key, cards_list in 
+                 [(key, [c for c in cards if (c.rank, c.suit) == key]) for key in key_counts.keys()]
                  if len(cards_list) >= 2]
         
         if not pairs:
@@ -897,7 +810,7 @@ class CardPlayingSystem:
             return max(cards, key=lambda c: self.card_comparison._get_card_value(c))
         
         # 找出对子中最大的牌
-        max_pair_rank, max_pair_cards = max(pairs, key=lambda p: self.card_comparison._get_card_value(p[1][0]))
+        max_pair_key, max_pair_cards = max(pairs, key=lambda p: self.card_comparison._get_card_value(p[1][0]))
         return max_pair_cards[0]
     
     def _is_trump_card(self, card: Card) -> bool:
@@ -969,7 +882,7 @@ class CardPlayingSystem:
     def _find_forced_cards_after_failed_slingshot(
         self, 
         slingshot_cards: List[Card], 
-        challenge_cards: List[Card]
+        all_challenge_cards: List[List[Card]]
     ) -> List[Card]:
         """
         甩牌失败后，找出强制出的牌
@@ -977,11 +890,11 @@ class CardPlayingSystem:
         使用与挑战检测相同的逻辑：
         1. 分解甩牌为：拖拉机、对子、单牌（互不重叠）
         2. 按优先级检查：单牌 > 对子 > 拖拉机
-        3. 返回被管上的那部分的最小值
+        3. 对每个玩家的挑战牌逐个判断，尽早找到最小值并返回
         
         Args:
             slingshot_cards: 尝试甩的牌
-            challenge_cards: 能管上的牌
+            all_challenge_cards: 每个玩家的挑战牌列表（每个元素是一个玩家的牌列表）
         
         Returns:
             强制出的牌列表
@@ -989,32 +902,90 @@ class CardPlayingSystem:
         # 使用slingshot_logic的分解方法
         slingshot_tractors, slingshot_pairs, slingshot_singles = self.slingshot_logic._decompose_slingshot(slingshot_cards)
         
-        # 找出挑战牌中的最大单牌
-        max_challenge_card = max(challenge_cards, key=lambda c: self.card_comparison._get_card_value(c))
-        
         # 优先级：单牌 > 对子 > 拖拉机
+        # 对每个优先级，逐个检查所有玩家的挑战牌，一旦找到能管上的就立即返回
         
         # 1. 检查单牌（最高优先级）
         if slingshot_singles:
             min_single = min(slingshot_singles, key=lambda c: self.card_comparison._get_card_value(c))
-            # 如果单牌被管上，返回最小单牌
-            if self.card_comparison.compare_cards(max_challenge_card, min_single) > 0:
-                return [min_single]
+            # 逐个检查每个玩家的挑战牌
+            for challenge_cards in all_challenge_cards:
+                if challenge_cards:
+                    max_challenger_single = max(challenge_cards, key=lambda c: self.card_comparison._get_card_value(c))
+                    if self.card_comparison.compare_cards(max_challenger_single, min_single) > 0:
+                        # 单张被管上，立即返回最小单牌
+                        return [min_single]
         
         # 2. 检查对子
         if slingshot_pairs:
             min_pair = min(slingshot_pairs, key=lambda pair: self.card_comparison._get_card_value(pair[0]))
             min_pair_card = min_pair[0]
-            # 检查挑战者是否有对子能管上
-            challenger_pair_max = self._find_max_card_in_pairs_from_cards(challenge_cards)
-            if challenger_pair_max and self.card_comparison.compare_cards(challenger_pair_max, min_pair_card) > 0:
-                return min_pair
+            # 逐个检查每个玩家的挑战牌
+            for challenge_cards in all_challenge_cards:
+                if challenge_cards:
+                    challenger_pair_max = self._find_max_card_in_pairs_from_cards(challenge_cards)
+                    if challenger_pair_max and self.card_comparison.compare_cards(challenger_pair_max, min_pair_card) > 0:
+                        # 对子被管上，立即返回最小对子
+                        return min_pair
         
         # 3. 检查拖拉机
         if slingshot_tractors:
-            min_tractor = min(slingshot_tractors, key=lambda t: self.card_comparison._get_card_value(min(t, key=lambda c: self.card_comparison._get_card_value(c))))
-            # 拖拉机被管上，返回最小拖拉机
-            return min_tractor
+            # 按拖拉机长度分组
+            tractors_by_length = {}
+            for tractor in slingshot_tractors:
+                length = len(tractor) // 2
+                if length not in tractors_by_length:
+                    tractors_by_length[length] = []
+                tractors_by_length[length].append(tractor)
+            
+            # 对每个长度的拖拉机，逐个检查所有玩家的挑战牌
+            for length, tractors in tractors_by_length.items():
+                # 找出该长度甩牌拖拉机中的最小拖拉机
+                min_tractor = min(tractors, key=lambda t: self.card_comparison._get_card_value(min(t, key=lambda c: self.card_comparison._get_card_value(c))))
+                min_tractor_card = min(min_tractor, key=lambda c: self.card_comparison._get_card_value(c))
+                
+                # 逐个检查每个玩家的挑战牌
+                for challenge_cards in all_challenge_cards:
+                    if not challenge_cards:
+                        continue
+                    
+                    # 分解挑战者的牌
+                    challenger_tractors, challenger_pairs, _ = self.slingshot_logic._decompose_slingshot(challenge_cards)
+                    
+                    # 按长度分组挑战者的拖拉机
+                    challenger_tractors_by_length = {}
+                    for tractor in challenger_tractors:
+                        t_length = len(tractor) // 2
+                        if t_length not in challenger_tractors_by_length:
+                            challenger_tractors_by_length[t_length] = []
+                        challenger_tractors_by_length[t_length].append(tractor)
+                    
+                    can_challenge = False
+                    
+                    # 检查相同长度的拖拉机
+                    if length in challenger_tractors_by_length:
+                        for challenger_tractor in challenger_tractors_by_length[length]:
+                            challenger_max_pair = max(challenger_tractor, key=lambda c: self.card_comparison._get_card_value(c))
+                            if self.card_comparison.compare_cards(challenger_max_pair, min_tractor_card) > 0:
+                                can_challenge = True
+                                break
+                    
+                    # 检查更长的拖拉机（可以拆分成该长度的拖拉机）
+                    if not can_challenge:
+                        for longer_length in challenger_tractors_by_length.keys():
+                            if longer_length > length:
+                                for challenger_tractor in challenger_tractors_by_length[longer_length]:
+                                    extracted_tractor = challenger_tractor[:length * 2]
+                                    extracted_max_pair = max(extracted_tractor, key=lambda c: self.card_comparison._get_card_value(c))
+                                    if self.card_comparison.compare_cards(extracted_max_pair, min_tractor_card) > 0:
+                                        can_challenge = True
+                                        break
+                                if can_challenge:
+                                    break
+                    
+                    # 如果该长度的拖拉机被管上，立即返回最小拖拉机
+                    if can_challenge:
+                        return min_tractor
         
         # 兜底：返回第一张牌
         return [slingshot_cards[0]]
