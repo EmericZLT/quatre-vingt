@@ -568,6 +568,89 @@ class CardPlayingSystem:
         
         return winner_player
     
+    def _check_card_type_match(self, follow_analysis: Dict[str, Any], led_analysis: Dict[str, Any]) -> bool:
+        """
+        检查跟牌者的牌型是否匹配领出者的牌型
+        
+        考虑规则：
+        - 每种长度的拖拉机都需要至少等量匹配
+        - 多余的更长的拖拉机可以被拆成短的拖拉机或对子以匹配
+        - 多余的拖拉机可以拆成对子，以弥补可能的对子不够的情况
+        
+        Args:
+            follow_analysis: 跟牌者的牌型分析结果（_analyze_card_types返回）
+            led_analysis: 领出者的牌型分析结果（_analyze_card_types返回）
+        
+        Returns:
+            True if 匹配, False otherwise
+        """
+        # 获取领出者的拖拉机信息（按长度分组）
+        led_tractors_by_length = {}
+        for tractor_info in led_analysis.get("tractors", []):
+            length = tractor_info["length"]
+            led_tractors_by_length[length] = led_tractors_by_length.get(length, 0) + 1
+        
+        # 获取跟牌者的拖拉机信息（按长度分组）
+        follow_tractors_by_length = {}
+        for tractor_info in follow_analysis.get("tractors", []):
+            length = tractor_info["length"]
+            follow_tractors_by_length[length] = follow_tractors_by_length.get(length, 0) + 1
+        
+        # 计算跟牌者可以拆分的资源
+        # 1. 独立对子数量
+        available_pairs = follow_analysis.get("pair_count", 0)
+        # 2. 记录从拖拉机拆分出来的对子（在拆分更长的拖拉机时产生）
+        pairs_from_tractors = 0
+        
+        # 检查每种长度的拖拉机是否匹配
+        for led_length, led_count in sorted(led_tractors_by_length.items(), reverse=True):
+            # 需要匹配的拖拉机数量
+            required_count = led_count
+            
+            # 先尝试用相同长度的拖拉机匹配
+            # 注意：用于匹配的拖拉机会被从follow_tractors_by_length中减去，不能再拆成对子
+            matching_count = min(follow_tractors_by_length.get(led_length, 0), required_count)
+            required_count -= matching_count
+            follow_tractors_by_length[led_length] = follow_tractors_by_length.get(led_length, 0) - matching_count
+            
+            # 如果还不够，尝试用更长的拖拉机拆分
+            if required_count > 0:
+                for longer_length in sorted(follow_tractors_by_length.keys(), reverse=True):
+                    if longer_length > led_length and follow_tractors_by_length[longer_length] > 0:
+                        # 一个更长的拖拉机可以拆成一个匹配的拖拉机 + 剩余的对子
+                        # 例如：长度为3的拖拉机可以拆成1个长度为2的拖拉机（用于匹配）+ 2个对子
+                        # 注意：用于匹配的那部分（长度为led_length）不能再拆成对子
+                        can_split = min(follow_tractors_by_length[longer_length], required_count)
+                        required_count -= can_split
+                        # 从follow_tractors_by_length中减去，表示这部分已被使用（用于匹配）
+                        follow_tractors_by_length[longer_length] -= can_split
+                        # 拆分后剩余的对子数（这部分对子可以用来匹配领出者的对子）
+                        pairs_from_tractors += can_split * (longer_length - led_length)
+                        if required_count == 0:
+                            break
+            
+            # 如果还不够，说明无法匹配
+            if required_count > 0:
+                return False
+        
+        # 检查对子是否匹配
+        led_pair_count = led_analysis.get("pair_count", 0)
+        # 跟牌者的对子 = 独立对子 + 从拖拉机拆分出来的对子 + 剩余未使用的拖拉机可以拆成的对子
+        # 注意：
+        # 1. 已经用于匹配的拖拉机（无论是相同长度的，还是拆分后用于匹配的部分）不能拆成对子
+        # 2. 这些已使用的拖拉机已经在匹配过程中从follow_tractors_by_length中减去了
+        # 3. 所以remaining_tractor_pairs只包含未使用的拖拉机，它们可以拆成对子
+        remaining_tractor_pairs = sum(
+            count * length for length, count in follow_tractors_by_length.items()
+        )
+        total_follow_pairs = available_pairs + pairs_from_tractors + remaining_tractor_pairs
+        
+        if total_follow_pairs < led_pair_count:
+            return False
+        
+        # 如果上面的检查都通过了（每种长度的拖拉机都匹配了，对子数也足够），就认为匹配
+        return True
+    
     def compare_cards_in_trick(self, cards1: List[Card], cards2: List[Card]) -> bool:
         """
         比较两组牌在当前轮次中的大小
@@ -591,46 +674,119 @@ class CardPlayingSystem:
         cards1_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards1)
         cards2_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards2)
         
-        # 1. 如果有将吃，需要检查牌型是否匹配
-        if cards1_all_trump and cards2_all_trump and led_suit_str != "trump":
+        # 将吃逻辑处理
+        # 1. 如果本轮最大牌（cards2）全是主牌，而当前玩家出的牌（cards1）不全是主牌，那么cards1一定不会更大
+        if cards2_all_trump and not cards1_all_trump:
+            return False
+        
+        # 2. 如果当前玩家出的牌全是主牌，而本轮最大牌不是all trump，只需要判断当前玩家出的牌的牌型是否和领出牌匹配
+        if cards1_all_trump and not cards2_all_trump:
             # 分析领出的牌型
             led_analysis = self.slingshot_logic._analyze_card_types(self.led_cards)
-            led_pair_count = led_analysis["pair_count"]
-            led_tractor_count = led_analysis["tractor_count"]
+            # 分析当前玩家出的牌的牌型
+            cards1_analysis = self.slingshot_logic._analyze_card_types(cards1)
             
-            # 筛选出牌型匹配的将吃玩家
+            # 检查牌型是否匹配（使用新的匹配函数）
+            cards1_valid = self._check_card_type_match(cards1_analysis, led_analysis)
+            if cards1_valid:
+                # 牌型匹配，cards1（主牌）大于cards2（非主牌）
+                return True
+            else:
+                # 牌型不匹配，cards1不能大于cards2
+                return False
+        
+        # 3. 如果当前玩家出的牌和本轮最大牌都是all trump
+        if cards1_all_trump and cards2_all_trump:
+            # 首先判断当前玩家出的牌是否和领出的牌匹配
+            led_analysis = self.slingshot_logic._analyze_card_types(self.led_cards)
             cards1_analysis = self.slingshot_logic._analyze_card_types(cards1)
             cards2_analysis = self.slingshot_logic._analyze_card_types(cards2)
-            cards1_pair_count = cards1_analysis["pair_count"]
-            cards2_pair_count = cards2_analysis["pair_count"]
-            cards1_tractor_count = cards1_analysis["tractor_count"]
-            cards2_tractor_count = cards2_analysis["tractor_count"]
             
-            # 检查牌型是否匹配
-            cards1_valid = cards1_pair_count >= led_pair_count and cards1_tractor_count >= led_tractor_count
-            cards2_valid = cards2_pair_count >= led_pair_count and cards2_tractor_count >= led_tractor_count
-            
+            # 检查cards1牌型是否匹配（使用新的匹配函数）
+            cards1_valid = self._check_card_type_match(cards1_analysis, led_analysis)
             if not cards1_valid:
                 return False
-            if not cards2_valid:
-                return True
             
-            # 如果有牌型匹配的将吃，比较主牌
-            if led_tractor_count > 0:
-                # 1. 甩牌有拖拉机：比较拖拉机大小
-                max1 = self._get_max_tractor_card(cards1)
-                max2 = self._get_max_tractor_card(cards2)
-                return self.card_comparison.compare_cards(max1, max2) > 0 if max1 and max2 else False
-            elif led_pair_count > 0:
-                # 2. 甩牌有对子（无拖拉机）：比较对子大小
-                max1 = self._get_max_pair_card(cards1)
-                max2 = self._get_max_pair_card(cards2)
-                return self.card_comparison.compare_cards(max1, max2) > 0 if max1 and max2 else False
+            # cards1牌型匹配，现在比较cards1和cards2的大小
+            # 复用_analyze_card_types的结果获取tractor信息
+            led_tractors_info = led_analysis.get("tractors", [])
+            
+            if led_tractors_info:
+                # 领出者有tractor，取其中最长的tractor长度
+                led_max_tractor_length = max(t["length"] for t in led_tractors_info)
+                
+                # 需要获取实际的tractor列表来比较大小，所以需要decompose
+                cards1_tractors, _, _ = self.slingshot_logic._decompose_slingshot(cards1)
+                cards2_tractors, _, _ = self.slingshot_logic._decompose_slingshot(cards2)
+                
+                # 找出长度>=领出者最长tractor长度的tractor（可以拆分成匹配的tractor）
+                cards1_matching_tractors = [t for t in cards1_tractors if len(t) // 2 >= led_max_tractor_length]
+                cards2_matching_tractors = [t for t in cards2_tractors if len(t) // 2 >= led_max_tractor_length]
+                
+                if cards1_matching_tractors and cards2_matching_tractors:
+                    # 找出最大的tractor（比较tractor中最大的牌）
+                    # 注意：即使tractor长度更长，也只需要比较整个tractor中最大的牌
+                    cards1_max_tractor = max(cards1_matching_tractors, key=lambda t: max(self.card_comparison._get_card_value(c) for c in t))
+                    cards2_max_tractor = max(cards2_matching_tractors, key=lambda t: max(self.card_comparison._get_card_value(c) for c in t))
+                    
+                    cards1_max_card = max(cards1_max_tractor, key=lambda c: self.card_comparison._get_card_value(c))
+                    cards2_max_card = max(cards2_max_tractor, key=lambda c: self.card_comparison._get_card_value(c))
+                    
+                    comparison = self.card_comparison.compare_cards(cards1_max_card, cards2_max_card)
+                    if comparison > 0:
+                        return True
+                    elif comparison < 0:
+                        return False
+                    else:
+                        # 同样大，先出方（cards2）更大
+                        return False
+                elif cards1_matching_tractors:
+                    # cards1有匹配的tractor（长度>=），cards2没有，cards1更大
+                    return True
+                else:
+                    # cards1没有匹配的tractor，cards1不能更大
+                    return False
+            elif led_analysis.get("pair_count", 0) > 0:
+                # 领出者没有tractor而有对子，比较最大对子
+                # 复用analysis结果，但需要decompose来获取实际的对子列表用于比较
+                cards1_tractors, cards1_pairs, _ = self.slingshot_logic._decompose_slingshot(cards1)
+                cards2_tractors, cards2_pairs, _ = self.slingshot_logic._decompose_slingshot(cards2)
+                
+                # 找出最大的对子（只比较最大的那一对）
+                if cards1_pairs and cards2_pairs:
+                    cards1_max_pair = max(cards1_pairs, key=lambda p: self.card_comparison._get_card_value(p[0]))
+                    cards2_max_pair = max(cards2_pairs, key=lambda p: self.card_comparison._get_card_value(p[0]))
+                    
+                    cards1_max_card = max(cards1_max_pair, key=lambda c: self.card_comparison._get_card_value(c))
+                    cards2_max_card = max(cards2_max_pair, key=lambda c: self.card_comparison._get_card_value(c))
+                    
+                    comparison = self.card_comparison.compare_cards(cards1_max_card, cards2_max_card)
+                    if comparison > 0:
+                        return True
+                    elif comparison < 0:
+                        return False
+                    else:
+                        # 同样大，先出方（cards2）更大
+                        return False
+                elif cards1_pairs:
+                    # cards1有对子，cards2没有，cards1更大
+                    return True
+                else:
+                    # cards1没有对子，cards1不能更大
+                    return False
             else:
-                # 3. 甩牌全是单牌：比较最大单牌
-                max1 = max(cards1, key=lambda c: self.card_comparison._get_card_value(c))
-                max2 = max(cards2, key=lambda c: self.card_comparison._get_card_value(c))
-                return self.card_comparison.compare_cards(max1, max2) > 0
+                # 领出方只有单张，比较最大单牌（只比较一张）
+                cards1_max_single = max(cards1, key=lambda c: self.card_comparison._get_card_value(c))
+                cards2_max_single = max(cards2, key=lambda c: self.card_comparison._get_card_value(c))
+                
+                comparison = self.card_comparison.compare_cards(cards1_max_single, cards2_max_single)
+                if comparison > 0:
+                    return True
+                elif comparison < 0:
+                    return False
+                else:
+                    # 同样大，先出方（cards2）更大
+                    return False
         
         # 2. 如果没有将吃，比较同花色的牌
         if cards1_all_led_suit and cards2_all_led_suit:
@@ -670,7 +826,7 @@ class CardPlayingSystem:
             # 都是单牌或没有对子/拖拉机，直接比较最大牌
             max_card1 = max(cards1, key=lambda c: self.card_comparison._get_card_value(c))
             max_card2 = max(cards2, key=lambda c: self.card_comparison._get_card_value(c))
-            return self.card_comparison.compare_cards(max_card2, max_card1) > 0
+            return self.card_comparison.compare_cards(max_card1, max_card2) > 0
         
         # 其他情况（垫牌等），cards1不能大于cards2
         return False

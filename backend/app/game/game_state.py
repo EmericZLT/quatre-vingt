@@ -456,6 +456,11 @@ class GameState:
         # 检查是否是领出（在调用CardPlayingSystem之前检查，因为CardPlayingSystem会更新current_trick）
         is_leading = len(self.card_playing_system.current_trick) == 0 if self.card_playing_system else len(self.current_trick) == 0
         
+        # 在调用play_card之前保存led_cards，因为play_card可能会在一轮完成时清空led_cards
+        saved_led_cards = None
+        if self.card_playing_system and not is_leading:
+            saved_led_cards = self.card_playing_system.led_cards.copy() if self.card_playing_system.led_cards else None
+        
         # 使用CardPlayingSystem处理出牌
         result = self.card_playing_system.play_card(player.position, cards, player.cards)
         
@@ -483,6 +488,11 @@ class GameState:
         else:
             # 跟牌时，判断是否比当前最大玩家更大
             if self.current_trick_max_player_id and self.card_playing_system:
+                # 如果led_cards被清空了（一轮完成时），临时恢复保存的值用于比较
+                trick_completed = len(self.current_trick_with_player) == 4
+                if saved_led_cards and not self.card_playing_system.led_cards:
+                    self.card_playing_system.led_cards = saved_led_cards.copy()
+                
                 # 获取当前最大玩家的牌
                 max_player = self.get_player_by_id(self.current_trick_max_player_id)
                 if max_player:
@@ -491,7 +501,6 @@ class GameState:
                     for entry in self.current_trick_with_player:
                         if entry["player_id"] == self.current_trick_max_player_id:
                             # 将字符串转换回Card对象
-                            from app.models.game import Card, Rank, Suit
                             max_player_cards = []
                             for card_str in entry["cards"]:
                                 parsed = self._parse_card_string(card_str)
@@ -504,6 +513,10 @@ class GameState:
                         if self.card_playing_system.compare_cards_in_trick(cards, max_player_cards):
                             # 当前玩家的牌更大，更新最大玩家
                             self.current_trick_max_player_id = player_id
+                
+                # 如果一轮已完成且我们临时恢复了led_cards，现在清空它（因为比较已完成）
+                if trick_completed and saved_led_cards and self.card_playing_system.led_cards == saved_led_cards:
+                    self.card_playing_system.led_cards = []
         
         # 如果一轮出完（4个玩家都出完），处理一轮完成逻辑
         if len(self.current_trick_with_player) == 4:
