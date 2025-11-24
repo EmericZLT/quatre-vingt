@@ -47,6 +47,12 @@ export const useGameStore = defineStore('game', {
       total_players: 0,
       ready_players: [] as string[]
     },
+    // 准备开始游戏的玩家状态（waiting阶段）
+    ready_to_start: {
+      ready_count: 0,
+      total_players: 0,
+      ready_players: [] as string[]
+    },
   }),
   actions: {
     applySnapshot(s: any) {
@@ -103,6 +109,14 @@ export const useGameStore = defineStore('game', {
           ready_count: s.ready_for_next_round.ready_count || 0,
           total_players: s.ready_for_next_round.total_players || 0,
           ready_players: s.ready_for_next_round.ready_players || []
+        }
+      }
+      // 处理准备开始游戏的状态
+      if (s.ready_to_start) {
+        this.ready_to_start = {
+          ready_count: s.ready_to_start.ready_count || 0,
+          total_players: s.ready_to_start.total_players || 0,
+          ready_players: s.ready_to_start.ready_players || []
         }
       }
     },
@@ -222,7 +236,7 @@ export const useGameStore = defineStore('game', {
       this.demoHands = { NORTH: [], WEST: [], SOUTH: [], EAST: [] }
       this.dealt_count = 0
     },
-    applyRoundEnd(e: { round_summary?: any; ready_count?: number; total_players?: number }) {
+    applyRoundEnd(e: { round_summary?: any; ready_count?: number; total_players?: number; ready_players?: string[] }) {
       if (e.round_summary) {
         this.round_summary = e.round_summary
       }
@@ -231,6 +245,9 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof e.total_players === 'number') {
         this.ready_for_next_round.total_players = e.total_players
+      }
+      if (Array.isArray(e.ready_players)) {
+        this.ready_for_next_round.ready_players = e.ready_players
       }
     },
     applyReadyForNextRoundUpdated(e: { player_id?: string; ready_count?: number; total_players?: number; all_ready?: boolean; ready_players?: string[] }) {
@@ -241,7 +258,30 @@ export const useGameStore = defineStore('game', {
         this.ready_for_next_round.total_players = e.total_players
       }
       if (Array.isArray(e.ready_players)) {
+        // 更新ready_players列表（完整列表）
         this.ready_for_next_round.ready_players = e.ready_players
+      } else if (e.player_id) {
+        // 如果没有提供ready_players列表，但有player_id，则添加到列表中
+        if (!this.ready_for_next_round.ready_players.includes(e.player_id)) {
+          this.ready_for_next_round.ready_players.push(e.player_id)
+        }
+      }
+    },
+    applyReadyToStartUpdated(e: { player_id?: string; ready_count?: number; total_players?: number; all_ready?: boolean; ready_players?: string[] }) {
+      if (typeof e.ready_count === 'number') {
+        this.ready_to_start.ready_count = e.ready_count
+      }
+      if (typeof e.total_players === 'number') {
+        this.ready_to_start.total_players = e.total_players
+      }
+      if (Array.isArray(e.ready_players)) {
+        // 更新ready_players列表（完整列表）
+        this.ready_to_start.ready_players = e.ready_players
+      } else if (e.player_id) {
+        // 如果没有提供ready_players列表，但有player_id，则添加到列表中
+        if (!this.ready_to_start.ready_players.includes(e.player_id)) {
+          this.ready_to_start.ready_players.push(e.player_id)
+        }
       }
     }
   },

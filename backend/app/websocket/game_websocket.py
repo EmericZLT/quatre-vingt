@@ -272,6 +272,14 @@ class ConnectionManager:
                 "ready_players": list(gs.players_ready_for_next_round)
             }
         
+        # 添加开始游戏的ready状态（waiting阶段）
+        if gs.game_phase == "waiting":
+            snapshot["ready_to_start"] = {
+                "ready_count": len(gs.players_ready_to_start),
+                "total_players": len(gs.room.players),
+                "ready_players": list(gs.players_ready_to_start)
+            }
+        
         if player_id:
             # 只发送给特定玩家
             await self.send_to_player(json.dumps(snapshot), room_id, player_id)
@@ -437,34 +445,54 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     json.dumps({"type": "pong"}), 
                     websocket
                 )
-            elif msg_type == "start_game":
-                # 开始游戏
+            elif msg_type == "ready_to_start_game":
+                # 玩家准备开始游戏
                 gs = manager.get_game_state(room_id)
-                if not gs:
-                    error_msg = {
-                        "type": "error",
-                        "message": "GameState not found for room"
-                    }
-                    await manager.broadcast_to_room(json.dumps(error_msg), room_id)
-                elif not room:
-                    await manager.send_personal_message(json.dumps({"type": "error", "message": "Room not found"}), websocket)
-                elif not player_id_current or (room.owner_id and player_id_current != room.owner_id):
-                    await manager.send_personal_message(json.dumps({"type": "error", "message": "只有房主可以开始游戏"}), websocket)
-                elif not room.can_start:
-                    await manager.send_personal_message(json.dumps({"type": "error", "message": "需要4名玩家才能开始游戏"}), websocket)
-                elif gs.start_game():
-                    await manager.send_snapshot(room_id)
-                    phase_event = {
-                        "type": "phase_changed",
-                        "phase": "dealing"
-                    }
-                    await manager.broadcast_to_room(json.dumps(phase_event), room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法准备开始游戏"}), websocket)
                 else:
-                    error_msg = {
-                        "type": "error",
-                        "message": "Failed to start game (check if room is ready)"
-                    }
-                    await manager.broadcast_to_room(json.dumps(error_msg), room_id)
+                    result = gs.ready_to_start_game(player_id_current)
+                    if result.get("success"):
+                        # 广播ready状态更新
+                        ready_event = {
+                            "type": "ready_to_start_updated",
+                            "player_id": player_id_current,
+                            "ready_count": result.get("ready_count", 0),
+                            "total_players": result.get("total_players", 0),
+                            "all_ready": result.get("all_ready", False),
+                            "ready_players": result.get("ready_players", [])
+                        }
+                        await manager.broadcast_to_room(json.dumps(ready_event), room_id)
+                        
+                        # 如果所有玩家都ready，游戏已自动开始，发送snapshot和phase_changed
+                        if result.get("game_started"):
+                            await manager.send_snapshot(room_id)
+                            phase_event = {
+                                "type": "phase_changed",
+                                "phase": "dealing"
+                            }
+                            await manager.broadcast_to_room(json.dumps(phase_event), room_id)
+                            
+                            # 自动开始发牌（类似之前的auto_deal功能）
+                            async def auto_deal_task():
+                                gs = manager.get_game_state(room_id)
+                                if gs:
+                                    while gs.dealt_count < 100 and gs.game_phase == "dealing":
+                                        await manager.handle_deal_tick(room_id)
+                                        await asyncio.sleep(0.1)  # 每0.1秒发一张牌
+                                    
+                                    # 发牌完成后，发送snapshot和phase_changed事件
+                                    if gs.game_phase == "bidding":
+                                        await manager.send_snapshot(room_id)
+                                        phase_event = {
+                                            "type": "phase_changed",
+                                            "phase": "bidding"
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(phase_event), room_id)
+                            
+                            asyncio.create_task(auto_deal_task())
+                    else:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "准备失败")}), websocket)
             elif msg_type == "deal_tick":
                 # 发一张牌
                 if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):
@@ -664,7 +692,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                             "type": "round_end",
                                             "round_summary": gs.round_summary,
                                             "ready_count": len(gs.players_ready_for_next_round),
-                                            "total_players": len(gs.room.players)
+                                            "total_players": len(gs.room.players),
+                                            "ready_players": list(gs.players_ready_for_next_round)
                                         }
                                         await manager.broadcast_to_room(json.dumps(round_end_event), room_id)
                                 else:
@@ -739,7 +768,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                             "player_id": player_id_current,
                             "ready_count": result.get("ready_count", 0),
                             "total_players": result.get("total_players", 0),
-                            "all_ready": result.get("all_ready", False)
+                            "all_ready": result.get("all_ready", False),
+                            "ready_players": result.get("ready_players", [])  # 包含所有已准备玩家的ID列表
                         }
                         await manager.broadcast_to_room(json.dumps(ready_event), room_id)
                         

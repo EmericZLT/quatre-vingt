@@ -69,13 +69,20 @@ class GameState:
         self.card_playing_system: Optional[CardPlayingSystem] = None  # 出牌系统，在trump_suit确定后初始化
         self.current_trick_max_player_id: Optional[str] = None  # 当前轮次中牌更大的玩家ID
         self.players_ready_for_next_round: set = set()  # 已准备好进入下一轮的玩家ID集合
+        self.players_ready_to_start: set = set()  # 已准备好开始游戏的玩家ID集合（waiting阶段使用）
         self.round_summary: Optional[Dict[str, Any]] = None  # 本局游戏总结信息
         self.bottom_bonus_info: Optional[Dict[str, Any]] = None  # 扣底信息：{"bottom_score": int, "multiplier": int, "bonus": int}
         
     def start_game(self) -> bool:
-        """开始游戏"""
-        if not self.room.can_start:
+        """开始游戏（当所有玩家都准备时自动调用）"""
+        # 检查是否有4名玩家
+        if len(self.room.players) != 4:
             return False
+        
+        # 检查是否所有玩家都准备（在waiting阶段）
+        if self.game_phase == "waiting":
+            if len(self.players_ready_to_start) != 4:
+                return False
         
         if self.fixed_dealer_position is not None:
             self.dealer_position = self.fixed_dealer_position
@@ -107,6 +114,7 @@ class GameState:
         
         # 清空游戏结束相关状态
         self.players_ready_for_next_round = set()
+        self.players_ready_to_start = set()  # 清空开始游戏的准备状态
         self.round_summary = None
         
         # 清空出牌记录
@@ -676,6 +684,7 @@ class GameState:
         self.bidding_cards = {}
         self.idle_score = 0  # 重置闲家得分
         self.players_ready_for_next_round = set()  # 清空ready状态
+        self.players_ready_to_start = set()  # 清空开始游戏的准备状态
         self.round_summary = None  # 清空本局总结
         self.bottom_bonus_info = None  # 清空扣底信息
         
@@ -930,6 +939,54 @@ class GameState:
         self.game_phase = "scoring"
         # 清空ready状态
         self.players_ready_for_next_round = set()
+        # 注意：不清空players_ready_to_start，因为下一轮开始时需要重新准备
+    
+    def ready_to_start_game(self, player_id: str) -> Dict[str, Any]:
+        """
+        玩家准备开始游戏（waiting阶段使用）
+        
+        Args:
+            player_id: 玩家ID
+            
+        Returns:
+            包含是否所有玩家都ready的信息，如果都ready则自动开始游戏
+        """
+        if self.game_phase != "waiting":
+            return {"success": False, "message": "当前不在等待阶段"}
+        
+        # 验证玩家是否在房间中
+        player = self.get_player_by_id(player_id)
+        if not player:
+            return {"success": False, "message": "玩家不存在"}
+        
+        # 添加玩家到ready集合
+        self.players_ready_to_start.add(player_id)
+        
+        # 检查是否所有玩家都ready
+        all_ready = len(self.players_ready_to_start) == len(self.room.players) and len(self.room.players) == 4
+        
+        # 如果所有玩家都ready，自动开始游戏
+        if all_ready:
+            if self.start_game():
+                return {
+                    "success": True,
+                    "all_ready": True,
+                    "ready_count": len(self.players_ready_to_start),
+                    "total_players": len(self.room.players),
+                    "ready_players": list(self.players_ready_to_start),
+                    "game_started": True
+                }
+            else:
+                return {"success": False, "message": "无法开始游戏"}
+        
+        return {
+            "success": True,
+            "all_ready": False,
+            "ready_count": len(self.players_ready_to_start),
+            "total_players": len(self.room.players),
+            "ready_players": list(self.players_ready_to_start),
+            "game_started": False
+        }
     
     def ready_for_next_round(self, player_id: str) -> Dict[str, Any]:
         """
@@ -959,7 +1016,8 @@ class GameState:
             "success": True,
             "all_ready": all_ready,
             "ready_count": len(self.players_ready_for_next_round),
-            "total_players": len(self.room.players)
+            "total_players": len(self.room.players),
+            "ready_players": list(self.players_ready_for_next_round)  # 包含所有已准备玩家的ID列表
         }
     
     def start_next_round(self) -> bool:

@@ -29,20 +29,6 @@
             >
               断开连接
             </button>
-            <button 
-              v-if="isHost && (phase === 'waiting' || phase === 'dealing' || !phase)"
-              @click="startGame"
-              class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm"
-            >
-              开始游戏
-            </button>
-            <button 
-              v-if="isHost && phase === 'dealing'"
-              @click="autoDeal"
-              class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
-            >
-              自动发牌
-            </button>
             <button
               v-if="phase === 'playing' && lastTrickCards.length > 0"
               @click="openLastTrick"
@@ -57,7 +43,6 @@
             >
               查看底牌
             </button>
-            <span v-if="!isHost" class="text-xs text-slate-400">仅房主可开始游戏</span>
           </template>
         </div>
       </div>
@@ -90,6 +75,19 @@
           <div class="text-xl font-bold text-center">
             {{ centerNotification.message }}
           </div>
+        </div>
+
+        <!-- 查看总结按钮（当总结隐藏时，显示在屏幕中央） -->
+        <div
+          v-if="phase === 'scoring' && game.round_summary && !showRoundSummary"
+          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50"
+        >
+          <button
+            @click="showRoundSummary = true"
+            class="px-6 py-3 rounded bg-amber-600 hover:bg-amber-700 text-white text-lg font-semibold shadow-lg"
+          >
+            查看总结
+          </button>
         </div>
 
         <!-- 本局游戏总结弹窗（scoring阶段） -->
@@ -169,56 +167,49 @@
           </div>
         </div>
 
-        <!-- 准备按钮和状态（在总结外部） -->
+        <!-- 准备按钮（在屏幕底部中央） -->
+        <!-- scoring阶段的准备按钮 -->
         <div
           v-if="phase === 'scoring' && game.round_summary"
-          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 translate-y-[300px] z-50"
+          class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50"
         >
-          <div class="bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-emerald-500 p-6 min-w-[400px]">
-            <!-- 准备按钮 -->
-            <div class="text-center mb-4">
-              <button
-                v-if="!isReadyForNextRound"
-                @click="sendReadyForNextRound"
-                class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
-              >
-                准备
-              </button>
-              <div v-else class="text-amber-300 text-lg font-semibold">
-                已准备
-              </div>
+          <div class="text-center">
+            <button
+              v-if="!isReadyForNextRound"
+              @click="sendReadyForNextRound"
+              class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
+            >
+              准备
+            </button>
+            <div v-else class="text-amber-300 text-lg font-semibold">
+              已准备
             </div>
-            
-            <!-- 准备状态（显示所有玩家的准备状态） -->
-            <div class="space-y-2">
-              <div class="text-center text-sm text-slate-400 mb-2">
-                准备进度：{{ game.ready_for_next_round.ready_count }} / {{ game.ready_for_next_round.total_players }}
-              </div>
-              <div class="grid grid-cols-2 gap-2 text-sm">
-                <div
-                  v-for="player in game.players"
-                  :key="player.id"
-                  class="flex items-center justify-between px-3 py-2 rounded bg-slate-800/50"
-                >
-                  <span class="text-slate-300">{{ player.name || getPositionLabel(player.position as Pos) }}</span>
-                  <span
-                    :class="game.ready_for_next_round.ready_players?.includes(player.id) ? 'text-emerald-400' : 'text-slate-500'"
-                    class="font-semibold"
-                  >
-                    {{ game.ready_for_next_round.ready_players?.includes(player.id) ? '✓ 已准备' : '未准备' }}
-                  </span>
-                </div>
-              </div>
+            <!-- 准备进度 -->
+            <div class="mt-2 text-sm text-slate-400">
+              准备进度：{{ game.ready_for_next_round.ready_count }} / {{ game.ready_for_next_round.total_players }}
             </div>
-            
-            <!-- 查看总结按钮（当总结隐藏时显示） -->
-            <div v-if="!showRoundSummary" class="text-center mt-4">
-              <button
-                @click="showRoundSummary = true"
-                class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold"
-              >
-                查看总结
-              </button>
+          </div>
+        </div>
+        
+        <!-- waiting阶段的准备按钮 -->
+        <div
+          v-if="phase === 'waiting'"
+          class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50"
+        >
+          <div class="text-center">
+            <button
+              v-if="!isReadyToStart"
+              @click="sendReadyToStart"
+              class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
+            >
+              准备
+            </button>
+            <div v-else class="text-amber-300 text-lg font-semibold">
+              已准备
+            </div>
+            <!-- 准备进度 -->
+            <div class="mt-2 text-sm text-slate-400">
+              准备进度：{{ game.ready_to_start.ready_count }} / {{ game.ready_to_start.total_players }}
             </div>
           </div>
         </div>
@@ -1245,16 +1236,21 @@ function getPlayerHand(pos: Pos): string[] {
   return Array(count).fill('__BACK__')
 }
 
-// 检查玩家是否已准备（仅在scoring阶段）
+// 检查玩家是否已准备（scoring阶段或waiting阶段）
 function isPlayerReady(pos: Pos): boolean {
-  if (phase.value !== 'scoring') return false
   const player = players.value.find(p => (p.position as string)?.toUpperCase() === pos)
   if (!player || !player.id) return false
-  return game.ready_for_next_round.ready_players?.includes(player.id) || false
+  
+  if (phase.value === 'scoring') {
+    return game.ready_for_next_round.ready_players?.includes(player.id) || false
+  } else if (phase.value === 'waiting') {
+    return game.ready_to_start.ready_players?.includes(player.id) || false
+  }
+  return false
 }
 
-// 是否显示准备状态（仅在scoring阶段）
-const showReadyStatus = computed(() => phase.value === 'scoring')
+// 是否显示准备状态（scoring阶段或waiting阶段）
+const showReadyStatus = computed(() => phase.value === 'scoring' || phase.value === 'waiting')
 
 // 连接WebSocket
 function connect() {
@@ -1286,15 +1282,6 @@ function clearAllHands() {
   game.resetDemoHands()
 }
 
-// 开始游戏
-function startGame() {
-  if (ws.connected) {
-    // 清空手牌
-    clearAllHands()
-    ws.send({ type: 'start_game' })
-  }
-}
-
 // 发送准备下一轮消息
 function sendReadyForNextRound() {
   if (ws.connected && playerId.value) {
@@ -1302,10 +1289,23 @@ function sendReadyForNextRound() {
   }
 }
 
-// 检查是否已准备
+// 准备开始游戏（waiting阶段）
+function sendReadyToStart() {
+  if (ws.connected && playerId.value) {
+    ws.send({ type: 'ready_to_start_game' })
+  }
+}
+
+// 检查是否已准备下一轮
 const isReadyForNextRound = computed(() => {
   if (!playerId.value || !game.ready_for_next_round.ready_players) return false
   return game.ready_for_next_round.ready_players.includes(playerId.value)
+})
+
+// 检查当前玩家是否已准备开始游戏
+const isReadyToStart = computed(() => {
+  if (!playerId.value || !game.ready_to_start.ready_players) return false
+  return game.ready_to_start.ready_players.includes(playerId.value)
 })
 
 // 获取级别标签
@@ -1520,6 +1520,9 @@ onMounted(() => {
     } else if (msg.type === 'ready_for_next_round_updated') {
       // 准备状态更新
       game.applyReadyForNextRoundUpdated(msg)
+    } else if (msg.type === 'ready_to_start_updated') {
+      // 准备开始游戏状态更新
+      game.applyReadyToStartUpdated(msg)
     } else if (msg.type === 'error') {
       // 处理错误信息（出牌失败等）
       if (msg.message) {
