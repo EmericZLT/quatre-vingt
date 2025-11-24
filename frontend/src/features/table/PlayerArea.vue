@@ -50,6 +50,17 @@
         </div>
       </div>
 
+      <!-- 准备状态显示（仅在scoring阶段显示） -->
+      <div
+        v-if="isReady && showReadyStatus"
+        class="ready-status-overlay"
+        :class="playedCardsPlacementClass"
+      >
+        <div class="ready-status-badge">
+          <span class="ready-status-text">已准备</span>
+        </div>
+      </div>
+
       <!-- 手牌区域（堆叠显示） -->
       <div 
         class="hand-area relative" 
@@ -98,6 +109,8 @@ interface Props {
   playedCards?: string[]
   selectable?: boolean
   selectedIndices?: number[]
+  isReady?: boolean
+  showReadyStatus?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -106,7 +119,9 @@ const props = withDefaults(defineProps<Props>(), {
   biddingCards: () => [],
   playedCards: () => [],
   selectable: false,
-  selectedIndices: () => []
+  selectedIndices: () => [],
+  isReady: false,
+  showReadyStatus: false
 })
 
 const emit = defineEmits<{
@@ -632,6 +647,64 @@ function handleCardClick(index: number, cardStr: string) {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 100%;
+}
+
+.ready-status-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.ready-status-overlay.played-cards-top {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ready-status-overlay.played-cards-bottom {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.ready-status-overlay.played-cards-left {
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ready-status-overlay.played-cards-right {
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ready-status-badge {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(16, 185, 129, 0.95));
+  border: 2px solid rgba(34, 197, 94, 1);
+  border-radius: 8px;
+  padding: 8px 16px;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.ready-status-text {
+  color: white;
+  font-weight: bold;
+  font-size: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.5px;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.05);
+  }
 }
 </style>
 

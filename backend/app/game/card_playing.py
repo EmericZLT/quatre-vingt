@@ -3,6 +3,7 @@
 """
 from typing import List, Optional, Dict, Any, Tuple, Set
 from enum import Enum
+from collections import Counter
 from app.models.game import Card, Suit, Rank, PlayerPosition
 from app.game.card_system import CardSystem
 from app.game.card_comparison import CardComparison
@@ -244,7 +245,6 @@ class CardPlayingSystem:
             same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
             
             # 检查是否有真正的对子（必须相同rank和相同suit）
-            from collections import Counter
             # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
             card_keys = [(c.rank, c.suit) for c in same_suit_cards]
             key_counts = Counter(card_keys)
@@ -287,8 +287,6 @@ class CardPlayingSystem:
         if not is_tractor or not is_same_suit_tractor:
             # 只有当该花色的牌没有出完时，才需要检查
             if same_suit_cards and len(same_suit_in_cards) < len(same_suit_cards):
-                from collections import Counter
-                
                 # 分析跟出者手牌中的拖拉机、对子、单牌
                 hand_tractors, hand_pairs, hand_singles = self.slingshot_logic._decompose_slingshot(same_suit_cards)
                 hand_tractor_lengths = [len(t) // 2 for t in hand_tractors]  # 所有拖拉机的长度列表
@@ -463,7 +461,6 @@ class CardPlayingSystem:
                     ]
                 
                 # 计算剩余牌中的对子数
-                    from collections import Counter
                 # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
                 remaining_follow_card_keys = [(c.rank, c.suit) for c in remaining_follow_cards]
                 remaining_follow_key_counts = Counter(remaining_follow_card_keys)
@@ -925,8 +922,6 @@ class CardPlayingSystem:
         Returns:
             拖拉机中最大的牌
         """
-        from collections import Counter
-        
         # 按(rank, suit)分组，找出真正的对子（不同花色的级牌不是对子）
         card_keys = [(c.rank, c.suit) for c in cards]
         key_counts = Counter(card_keys)
@@ -952,8 +947,6 @@ class CardPlayingSystem:
         Returns:
             对子中最大的牌
         """
-        from collections import Counter
-        
         # 按(rank, suit)分组，找出真正的对子（不同花色的级牌不是对子）
         card_keys = [(c.rank, c.suit) for c in cards]
         key_counts = Counter(card_keys)

@@ -4,7 +4,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import random
-from app.models.game import GameRoom, Player, PlayerPosition, GameStatus, Suit, Card
+from app.models.game import GameRoom, Player, PlayerPosition, GameStatus, Suit, Card, Rank
 from app.game.card_system import CardSystem
 from app.game.bidding_system import BiddingSystem
 from app.game.card_sorter import CardSorter
@@ -19,6 +19,9 @@ class GameState:
         self.card_system = CardSystem()
         self.bidding_system = BiddingSystem(self.card_system.current_level)
         self.trump_suit: Optional[Suit] = None
+        # 南北家和东西家独立级别（初始都是2）
+        self.north_south_level: int = 2  # 南北家级别
+        self.east_west_level: int = 2    # 东西家级别
         self.dealer_position: PlayerPosition = PlayerPosition.NORTH
         self.current_player: PlayerPosition = PlayerPosition.NORTH
         self.current_trick: List[Card] = []  # 保持向后兼容，但实际使用current_trick_with_player
@@ -65,6 +68,9 @@ class GameState:
         self._bidding_queue: List[str] = []
         self.card_playing_system: Optional[CardPlayingSystem] = None  # 出牌系统，在trump_suit确定后初始化
         self.current_trick_max_player_id: Optional[str] = None  # 当前轮次中牌更大的玩家ID
+        self.players_ready_for_next_round: set = set()  # 已准备好进入下一轮的玩家ID集合
+        self.round_summary: Optional[Dict[str, Any]] = None  # 本局游戏总结信息
+        self.bottom_bonus_info: Optional[Dict[str, Any]] = None  # 扣底信息：{"bottom_score": int, "multiplier": int, "bonus": int}
         
     def start_game(self) -> bool:
         """开始游戏"""
@@ -99,11 +105,18 @@ class GameState:
         # 重置分数
         self.idle_score = 0
         
+        # 清空游戏结束相关状态
+        self.players_ready_for_next_round = set()
+        self.round_summary = None
+        
         # 清空出牌记录
         self.current_trick = []
         self.current_trick_with_player = []
         self.last_trick = []
         self.trick_leader = None
+        
+        # 清空扣底信息
+        self.bottom_bonus_info = None
         
         # 发牌顺序：第一局随机选择一名玩家开始，后续局从庄家开始
         if self.is_first_round:
@@ -396,6 +409,8 @@ class GameState:
     def _init_card_playing_system(self):
         """初始化出牌系统（在trump_suit确定后调用）"""
         if self.trump_suit is not None or self.game_phase == "playing":
+            # 确保使用最新的级别（庄家级别）来初始化系统
+            # 因为级牌判断需要用到current_level
             self.card_playing_system = CardPlayingSystem(
                 self.card_system,
                 self.trump_suit
@@ -523,6 +538,12 @@ class GameState:
             winner = self._determine_trick_winner(result)
             if winner:
                 self._handle_trick_completion(winner)
+                
+                # 检查是否所有玩家手牌都为空（游戏结束）
+                all_hands_empty = all(len(p.cards) == 0 for p in self.room.players)
+                if all_hands_empty and self.game_phase == "playing":
+                    # 游戏结束，进入计分阶段
+                    self._handle_game_end()
         else:
             # 如果还没完成一轮，更新current_player为下一个玩家（逆时针）
             # 无论是领出还是跟牌，都需要更新current_player
@@ -654,6 +675,9 @@ class GameState:
         self.trick_leader = None
         self.bidding_cards = {}
         self.idle_score = 0  # 重置闲家得分
+        self.players_ready_for_next_round = set()  # 清空ready状态
+        self.round_summary = None  # 清空本局总结
+        self.bottom_bonus_info = None  # 清空扣底信息
         
         return True
     
@@ -714,7 +738,9 @@ class GameState:
             "room_id": self.room.id,
             "status": self.room.status.value,
             "phase": self.game_phase,
-            "current_level": self.card_system.current_level,
+            "current_level": self.card_system.current_level,  # 庄家级别（用于级牌判断）
+            "north_south_level": self.north_south_level,
+            "east_west_level": self.east_west_level,
             "trump_suit": self.trump_suit.value if self.trump_suit else None,
             "current_player": self.current_player.value,
             "dealer_position": self.dealer_position.value,
@@ -781,7 +807,6 @@ class GameState:
     
     def _calculate_trick_points_from_current_trick(self) -> int:
         """从current_trick_with_player计算当墩分数"""
-        from app.models.game import Rank
         points = 0
         for entry in self.current_trick_with_player:
             for card_str in entry["cards"]:
@@ -795,9 +820,180 @@ class GameState:
                         points += 10
         return points
     
+    def _handle_game_end(self) -> None:
+        """
+        处理游戏结束逻辑：
+        1. 确保最后一轮已处理（判断大小、扣底）
+        2. 计算升级
+        3. 确定下一轮庄家
+        4. 进入scoring阶段
+        """
+        if self.game_phase != "playing":
+            return
+        
+        # 确保最后一轮的分数已经计算（_handle_trick_completion已经处理）
+        # 获取最终闲家得分（包括扣底）
+        final_idle_score = self.idle_score
+        
+        # 获取扣底信息（已在_handle_bottom_bonus中计算并保存）
+        bottom_score = 0
+        bottom_bonus = 0
+        if self.bottom_bonus_info:
+            bottom_score = self.bottom_bonus_info["bottom_score"]
+            bottom_bonus = self.bottom_bonus_info["bonus"]
+        
+        # 计算基础得分（不含扣底）
+        # final_idle_score已经包含了扣底，所以需要减去扣底得到基础得分
+        base_idle_score = final_idle_score - bottom_bonus
+        
+        # 计算升级
+        # 升级规则：
+        # 1. 闲家分数抹零（65分视作60分）
+        # 2. 对于剩下的分数r：
+        #    - 如果达到80，则闲家方升(r-80)//10级
+        #    - 如果没有达到80，则庄家方升(80-r)//10级
+        # 3. 庄家和闲家的级别是独立计算的
+        
+        # 确定当前庄家方和闲家方
+        # 庄家方：NORTH-SOUTH 或 EAST-WEST（根据dealer_position）
+        # 闲家方：另一方
+        if self.dealer_position in [PlayerPosition.NORTH, PlayerPosition.SOUTH]:
+            dealer_side = "north_south"
+            idle_side = "east_west"
+            dealer_level = self.north_south_level
+            idle_level = self.east_west_level
+        else:
+            dealer_side = "east_west"
+            idle_side = "north_south"
+            dealer_level = self.east_west_level
+            idle_level = self.north_south_level
+        
+        # 分数抹零（向下取整到10的倍数，仅用于计算升级）
+        rounded_score = (final_idle_score // 10) * 10
+        
+        # 保存升级前的级别（用于round_summary）
+        old_north_south_level = self.north_south_level
+        old_east_west_level = self.east_west_level
+        
+        # 计算升级
+        if rounded_score >= 80:
+            # 闲家升级
+            idle_level_up = (rounded_score - 80) // 10
+            idle_level = min(14, idle_level + idle_level_up)
+            dealer_level_up = 0
+        else:
+            # 庄家升级
+            dealer_level_up = (80 - rounded_score) // 10
+            dealer_level = min(14, dealer_level + dealer_level_up)
+            idle_level_up = 0
+        
+        # 更新级别（根据位置）
+        if dealer_side == "north_south":
+            self.north_south_level = dealer_level
+            self.east_west_level = idle_level
+        else:
+            self.east_west_level = dealer_level
+            self.north_south_level = idle_level
+        
+        # 更新card_system的current_level为庄家级别（因为级牌以庄家级别为准）
+        self.card_system.set_level(dealer_level)
+        self.bidding_system = BiddingSystem(dealer_level)
+        
+        # 计算下一轮庄家
+        next_dealer = self.calculate_next_dealer(final_idle_score)
+        
+        # 获取下一轮庄家玩家信息
+        next_dealer_player = self.get_player_by_position(next_dealer)
+        next_dealer_name = next_dealer_player.name if next_dealer_player else next_dealer.value
+        
+        # 保存本局总结信息（包括底牌，用于查看）
+        self.round_summary = {
+            "idle_score": base_idle_score,  # 基础得分（不含扣底）
+            "bottom_score": bottom_score,
+            "bottom_bonus": bottom_bonus,
+            "total_score": final_idle_score,  # 总得分（包括扣底，完整分数，不抹零）
+            "dealer_side": dealer_side,  # 当前庄家方："north_south" 或 "east_west"
+            "idle_side": idle_side,  # 当前闲家方
+            "dealer_level_up": dealer_level_up,
+            "idle_level_up": idle_level_up,
+            "old_north_south_level": old_north_south_level,
+            "old_east_west_level": old_east_west_level,
+            "new_north_south_level": self.north_south_level,
+            "new_east_west_level": self.east_west_level,
+            "next_dealer": next_dealer.value,
+            "next_dealer_name": next_dealer_name,
+            "bottom_cards": [str(card) for card in self.bottom_cards],  # 保存底牌字符串列表
+            "tricks_won": self.tricks_won.copy()
+        }
+        
+        # 进入scoring阶段
+        self.game_phase = "scoring"
+        # 清空ready状态
+        self.players_ready_for_next_round = set()
+    
+    def ready_for_next_round(self, player_id: str) -> Dict[str, Any]:
+        """
+        玩家准备进入下一轮
+        
+        Args:
+            player_id: 玩家ID
+            
+        Returns:
+            包含是否所有玩家都ready的信息
+        """
+        if self.game_phase != "scoring":
+            return {"success": False, "message": "当前不在计分阶段"}
+        
+        # 验证玩家是否在房间中
+        player = self.get_player_by_id(player_id)
+        if not player:
+            return {"success": False, "message": "玩家不存在"}
+        
+        # 添加玩家到ready集合
+        self.players_ready_for_next_round.add(player_id)
+        
+        # 检查是否所有玩家都ready
+        all_ready = len(self.players_ready_for_next_round) == len(self.room.players)
+        
+        return {
+            "success": True,
+            "all_ready": all_ready,
+            "ready_count": len(self.players_ready_for_next_round),
+            "total_players": len(self.room.players)
+        }
+    
+    def start_next_round(self) -> bool:
+        """
+        开始下一轮游戏
+        
+        Returns:
+            是否成功开始
+        """
+        if self.game_phase != "scoring":
+            return False
+        
+        if len(self.players_ready_for_next_round) != len(self.room.players):
+            return False
+        
+        # 应用下一轮设置
+        if self.round_summary:
+            self.dealer_position = PlayerPosition(self.round_summary["next_dealer"])
+            # 如果这是第一局，固定庄家位置
+            if self.is_first_round:
+                self.fixed_dealer_position = self.dealer_position
+        
+        # 调用end_round来重置状态（但不改变庄家，因为已经设置好了）
+        # 注意：end_round会重置game_phase为waiting，但我们需要保持waiting状态
+        self.end_round(self.idle_score)
+        self.game_phase = "waiting"  # 保持waiting状态，等待房主开始下一局
+        
+        # 清空round_summary
+        self.round_summary = None
+        
+        return True
+    
     def _parse_card_string(self, card_str: str) -> Optional[Card]:
         """解析卡牌字符串为Card对象"""
-        from app.models.game import Card, Rank, Suit
         try:
             if "JOKER-A" in card_str or "JOKER/大王" in card_str:
                 return Card(rank=Rank.BIG_JOKER, is_joker=True)
@@ -878,6 +1074,12 @@ class GameState:
         """
         all_hands_empty = all(len(p.cards) == 0 for p in self.room.players)
         if not all_hands_empty or not self.card_playing_system.bottom_cards:
+            self.bottom_bonus_info = None  # 没有扣底
+            return
+        
+        # 检查是否是闲家获胜
+        if winner not in self.card_playing_system.idle_positions:
+            self.bottom_bonus_info = None  # 庄家获胜，没有扣底
             return
         
         bottom_score = sum(self.card_system.get_card_score(card) 
@@ -890,7 +1092,17 @@ class GameState:
             bonus = bottom_score * multiplier
             if bonus:
                 self.card_playing_system.idle_score += bonus
+                # 保存扣底信息用于展示
+                self.bottom_bonus_info = {
+                    "bottom_score": bottom_score,
+                    "multiplier": multiplier,
+                    "bonus": bonus
+                }
                 print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
+            else:
+                self.bottom_bonus_info = None
+        else:
+            self.bottom_bonus_info = None
     
     def _get_led_cards_from_current_trick(self) -> List[Card]:
         """从current_trick_with_player获取领出者的牌"""
@@ -921,20 +1133,4 @@ class GameState:
         # self.current_trick_with_player = []  # 延迟清空，在websocket中处理
         self.trick_leader = None
         self.current_trick_max_player_id = None  # 清空当前轮次最大玩家
-    
-    def _calculate_trick_points_from_current_trick(self) -> int:
-        """从current_trick_with_player计算当墩分数"""
-        from app.models.game import Rank
-        points = 0
-        for entry in self.current_trick_with_player:
-            for card_str in entry["cards"]:
-                card = self._parse_card_string(card_str)
-                if card and not card.is_joker:
-                    if card.rank == Rank.FIVE:
-                        points += 5
-                    elif card.rank == Rank.TEN:
-                        points += 10
-                    elif card.rank == Rank.KING:
-                        points += 10
-        return points
     

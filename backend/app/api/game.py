@@ -4,6 +4,7 @@ Game API endpoints
 from fastapi import APIRouter, HTTPException
 from typing import List
 from pydantic import BaseModel
+import uuid
 from app.models.game import GameRoom, Player, PlayerPosition
 
 router = APIRouter()
@@ -28,7 +29,6 @@ async def get_rooms() -> List[GameRoom]:
 @router.post("/rooms")
 async def create_room(request: CreateRoomRequest) -> GameRoom:
     """Create a new game room"""
-    import uuid
     room_id = str(uuid.uuid4())
     room = GameRoom(id=room_id, name=request.name)
     rooms[room_id] = room
@@ -65,7 +65,6 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
     if not available_positions:
         raise HTTPException(status_code=400, detail="No available positions")
     
-    import uuid
     player = Player(
         id=str(uuid.uuid4()),
         name=request.player_name,

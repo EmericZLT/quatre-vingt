@@ -4,9 +4,12 @@ Game WebSocket handlers
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Dict, List, Optional
 import json
+import uuid
+import asyncio
 from app.game.game_state import GameState
+from app.game.card_sorter import CardSorter
 from app.api.game import rooms
-from app.models.game import Card, Rank, Suit
+from app.models.game import Card, Rank, Suit, GameRoom, Player, PlayerPosition
 
 router = APIRouter()
 
@@ -71,8 +74,6 @@ class ConnectionManager:
                 return
             # demo 房间用于调试演示
             if room_id not in rooms:
-                from app.models.game import GameRoom, Player, PlayerPosition
-                import uuid
                 test_room = GameRoom(id=room_id, name=f"测试房间-{room_id}")
                 for pos in [PlayerPosition.NORTH, PlayerPosition.WEST, PlayerPosition.SOUTH, PlayerPosition.EAST]:
                     player = Player(
@@ -89,8 +90,6 @@ class ConnectionManager:
             if room.players:
                 player_id = room.players[0].id
             else:
-                from app.models.game import Player, PlayerPosition
-                import uuid
                 player = Player(
                     id=str(uuid.uuid4()),
                     name="测试玩家",
@@ -188,7 +187,6 @@ class ConnectionManager:
             player = gs.get_player_by_id(player_id)
             if player:
                 # 获取排序后的手牌
-                from app.game.card_sorter import CardSorter
                 sorter = CardSorter(
                     current_level=gs.card_system.current_level,
                     trump_suit=gs.trump_suit
@@ -202,7 +200,9 @@ class ConnectionManager:
             "room_id": room_id,
             "room_name": gs.room.name if gs and gs.room else None,
             "owner_id": gs.room.owner_id if gs and gs.room else None,
-            "current_level": gs.card_system.current_level if gs and gs.card_system else None,
+            "current_level": gs.card_system.current_level if gs and gs.card_system else None,  # 庄家级别（用于级牌判断）
+            "north_south_level": gs.north_south_level if gs else None,
+            "east_west_level": gs.east_west_level if gs else None,
             "phase": gs.game_phase,
             "dealer_position": gs.dealer_position.value if gs.dealer_position else None,
             "dealer_player_id": dealer.id if dealer else None,
@@ -262,6 +262,16 @@ class ConnectionManager:
         else:
             snapshot["current_player"] = None
         
+        # 添加本局总结信息（如果在scoring阶段）
+        if hasattr(gs, "round_summary") and gs.round_summary:
+            snapshot["round_summary"] = gs.round_summary
+            # 添加ready状态
+            snapshot["ready_for_next_round"] = {
+                "ready_count": len(gs.players_ready_for_next_round),
+                "total_players": len(gs.room.players),
+                "ready_players": list(gs.players_ready_for_next_round)
+            }
+        
         if player_id:
             # 只发送给特定玩家
             await self.send_to_player(json.dumps(snapshot), room_id, player_id)
@@ -273,7 +283,6 @@ class ConnectionManager:
                     # 为每个玩家生成个性化的快照
                     player = gs.get_player_by_id(conn.player_id)
                     if player:
-                        from app.game.card_sorter import CardSorter
                         sorter = CardSorter(
                             current_level=gs.card_system.current_level,
                             trump_suit=gs.trump_suit
@@ -381,8 +390,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
     if not player_id:
         # 如果房间不存在，创建测试房间
         if room_id not in rooms:
-            from app.models.game import GameRoom, Player, PlayerPosition
-            import uuid
             test_room = GameRoom(id=room_id, name=f"测试房间-{room_id}")
             # 创建4个测试玩家
             for pos in [PlayerPosition.NORTH, PlayerPosition.WEST, PlayerPosition.SOUTH, PlayerPosition.EAST]:
@@ -401,8 +408,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
             player_id = room.players[0].id
         else:
             # 如果没有玩家，创建一个
-            from app.models.game import Player, PlayerPosition
-            import uuid
             player = Player(
                 id=str(uuid.uuid4()),
                 name="测试玩家",
@@ -650,6 +655,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                         gs.current_trick_with_player = []
                                     
                                     await manager.send_snapshot(room_id)
+                                    
+                                    # 检查游戏是否结束（所有玩家手牌为空）
+                                    # 注意：_handle_game_end会在play_card中调用，所以这里检查phase是否为scoring
+                                    if gs.game_phase == "scoring" and gs.round_summary:
+                                        # 游戏结束，发送round_end事件
+                                        round_end_event = {
+                                            "type": "round_end",
+                                            "round_summary": gs.round_summary,
+                                            "ready_count": len(gs.players_ready_for_next_round),
+                                            "total_players": len(gs.room.players)
+                                        }
+                                        await manager.broadcast_to_room(json.dumps(round_end_event), room_id)
                                 else:
                                     # 出牌失败，检查是否是甩牌失败（有forced_cards）
                                     error_msg = result.get("message", "出牌失败")
@@ -701,7 +718,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     await manager.send_personal_message(json.dumps({"type": "error", "message": "只有房主可以自动发牌"}), websocket)
                 else:
                     # 创建后台任务，不阻塞主循环
-                    import asyncio
                     async def auto_deal_task():
                         gs = manager.get_game_state(room_id)
                         if gs:
@@ -709,6 +725,31 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                 await manager.handle_deal_tick(room_id)
                                 await asyncio.sleep(0.1)
                     asyncio.create_task(auto_deal_task())
+            elif msg_type == "ready_for_next_round":
+                # 玩家准备进入下一轮
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法准备下一轮"}), websocket)
+                else:
+                    result = gs.ready_for_next_round(player_id_current)
+                    if result.get("success"):
+                        # 广播ready状态更新
+                        ready_event = {
+                            "type": "ready_for_next_round_updated",
+                            "player_id": player_id_current,
+                            "ready_count": result.get("ready_count", 0),
+                            "total_players": result.get("total_players", 0),
+                            "all_ready": result.get("all_ready", False)
+                        }
+                        await manager.broadcast_to_room(json.dumps(ready_event), room_id)
+                        
+                        # 如果所有玩家都ready，自动开始下一轮
+                        if result.get("all_ready"):
+                            if gs.start_next_round():
+                                await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": "waiting"}), room_id)
+                                await manager.send_snapshot(room_id)
+                    else:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "准备失败")}), websocket)
             else:
                 # 其他消息类型可以后续扩展
                 await manager.send_personal_message(

@@ -92,6 +92,137 @@
           </div>
         </div>
 
+        <!-- 本局游戏总结弹窗（scoring阶段） -->
+        <div
+          v-if="phase === 'scoring' && game.round_summary && showRoundSummary"
+          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-amber-500 p-8 min-w-[500px]"
+        >
+          <div class="text-center mb-6">
+            <h2 class="text-2xl font-bold text-amber-300 mb-2">本局游戏总结</h2>
+          </div>
+          
+          <div class="space-y-4 mb-6">
+            <!-- 闲家得分 -->
+            <div class="flex justify-between items-center">
+              <span class="text-slate-300">闲家得分：</span>
+              <span class="text-lg font-semibold">{{ game.round_summary.idle_score }}分</span>
+            </div>
+            
+            <!-- 扣底信息 -->
+            <div v-if="game.round_summary.bottom_bonus > 0" class="flex justify-between items-center">
+              <span class="text-slate-300">扣底得分：</span>
+              <span class="text-lg font-semibold text-amber-300">
+                +{{ game.round_summary.bottom_bonus }}分
+                <span class="text-sm text-slate-400 ml-2">
+                  (底牌{{ game.round_summary.bottom_score }}分 × {{ game.round_summary.bottom_score > 0 ? (game.round_summary.bottom_bonus / game.round_summary.bottom_score).toFixed(0) : 1 }}倍)
+                </span>
+              </span>
+            </div>
+            
+            <!-- 总得分 -->
+            <div class="flex justify-between items-center border-t border-slate-700 pt-2">
+              <span class="text-lg font-semibold">闲家总得分：</span>
+              <span class="text-2xl font-bold text-amber-300">{{ game.round_summary.total_score }}分</span>
+            </div>
+            
+            <!-- 升级信息 -->
+            <div class="flex flex-col gap-2 border-t border-slate-700 pt-2">
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300">南北家级别：</span>
+                <span class="text-lg font-semibold">
+                  {{ getLevelLabel(game.round_summary.old_north_south_level) }} → {{ getLevelLabel(game.round_summary.new_north_south_level) }}
+                  <span v-if="game.round_summary.dealer_side === 'north_south' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
+                  <span v-if="game.round_summary.idle_side === 'north_south' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
+                </span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300">东西家级别：</span>
+                <span class="text-lg font-semibold">
+                  {{ getLevelLabel(game.round_summary.old_east_west_level) }} → {{ getLevelLabel(game.round_summary.new_east_west_level) }}
+                  <span v-if="game.round_summary.dealer_side === 'east_west' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
+                  <span v-if="game.round_summary.idle_side === 'east_west' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
+                </span>
+              </div>
+            </div>
+            
+            <!-- 下一轮庄家 -->
+            <div class="flex justify-between items-center border-t border-slate-700 pt-2">
+              <span class="text-slate-300">下一轮庄家：</span>
+              <span class="text-lg font-semibold">{{ game.round_summary.next_dealer_name || getPositionLabel(game.round_summary.next_dealer) }}</span>
+            </div>
+          </div>
+          
+          <!-- 底部按钮 -->
+          <div class="flex gap-2 justify-center border-t border-slate-700 pt-4">
+            <button
+              @click="openRoundSummaryBottomCards"
+              class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold"
+            >
+              查看底牌
+            </button>
+            <button
+              @click="showRoundSummary = false"
+              class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold"
+            >
+              隐藏总结
+            </button>
+          </div>
+        </div>
+
+        <!-- 准备按钮和状态（在总结外部） -->
+        <div
+          v-if="phase === 'scoring' && game.round_summary"
+          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 translate-y-[300px] z-50"
+        >
+          <div class="bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-emerald-500 p-6 min-w-[400px]">
+            <!-- 准备按钮 -->
+            <div class="text-center mb-4">
+              <button
+                v-if="!isReadyForNextRound"
+                @click="sendReadyForNextRound"
+                class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
+              >
+                准备
+              </button>
+              <div v-else class="text-amber-300 text-lg font-semibold">
+                已准备
+              </div>
+            </div>
+            
+            <!-- 准备状态（显示所有玩家的准备状态） -->
+            <div class="space-y-2">
+              <div class="text-center text-sm text-slate-400 mb-2">
+                准备进度：{{ game.ready_for_next_round.ready_count }} / {{ game.ready_for_next_round.total_players }}
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <div
+                  v-for="player in game.players"
+                  :key="player.id"
+                  class="flex items-center justify-between px-3 py-2 rounded bg-slate-800/50"
+                >
+                  <span class="text-slate-300">{{ player.name || getPositionLabel(player.position as Pos) }}</span>
+                  <span
+                    :class="game.ready_for_next_round.ready_players?.includes(player.id) ? 'text-emerald-400' : 'text-slate-500'"
+                    class="font-semibold"
+                  >
+                    {{ game.ready_for_next_round.ready_players?.includes(player.id) ? '✓ 已准备' : '未准备' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 查看总结按钮（当总结隐藏时显示） -->
+            <div v-if="!showRoundSummary" class="text-center mt-4">
+              <button
+                @click="showRoundSummary = true"
+                class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold"
+              >
+                查看总结
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 顶部（上方） -->
         <div class="absolute top-8 left-1/2 transform -translate-x-1/2 z-20">
           <PlayerArea 
@@ -102,6 +233,8 @@
             :displayName="getSeatName(viewMap.top)"
             :biddingCards="getBiddingCards(viewMap.top)"
             :playedCards="getPlayedCards(viewMap.top)"
+            :isReady="isPlayerReady(viewMap.top)"
+            :showReadyStatus="showReadyStatus"
           />
         </div>
 
@@ -115,6 +248,8 @@
             :displayName="getSeatName(viewMap.left)"
             :biddingCards="getBiddingCards(viewMap.left)"
             :playedCards="getPlayedCards(viewMap.left)"
+            :isReady="isPlayerReady(viewMap.left)"
+            :showReadyStatus="showReadyStatus"
           />
         </div>
 
@@ -130,6 +265,8 @@
             :playedCards="getPlayedCards(viewMap.bottom)"
             :selectable="isSelectingBottom || isSelectingCard"
             :selectedIndices="selectedCardIndices"
+            :isReady="isPlayerReady(viewMap.bottom)"
+            :showReadyStatus="showReadyStatus"
             @card-click="handleCardClick"
           />
 
@@ -263,6 +400,8 @@
             :displayName="getSeatName(viewMap.right)"
             :biddingCards="getBiddingCards(viewMap.right)"
             :playedCards="getPlayedCards(viewMap.right)"
+            :isReady="isPlayerReady(viewMap.right)"
+            :showReadyStatus="showReadyStatus"
           />
         </div>
       </div>
@@ -289,6 +428,38 @@
         <img
           v-for="(card, cardIdx) in bottomCards"
           :key="`bottom-card-${cardIdx}`"
+          :src="getCardImage(card)"
+          :alt="card"
+          class="w-20 h-28 object-cover rounded border-2 border-amber-300/50 shadow-lg"
+          @error="handleImageError"
+        />
+      </div>
+      <div v-else class="text-slate-400 text-center py-8">
+        暂无底牌
+      </div>
+    </div>
+  </div>
+
+  <!-- 本局总结的底牌查看弹窗 -->
+  <div
+    v-if="showRoundSummaryBottomCards"
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+    @click.self="closeRoundSummaryBottomCards"
+  >
+    <div class="bg-slate-800 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-xl font-semibold text-white">本局底牌</h3>
+        <button
+          @click="closeRoundSummaryBottomCards"
+          class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 text-white text-sm"
+        >
+          关闭
+        </button>
+      </div>
+      <div v-if="roundSummaryBottomCards && roundSummaryBottomCards.length > 0" class="flex gap-2 flex-wrap justify-center">
+        <img
+          v-for="(card, cardIdx) in roundSummaryBottomCards"
+          :key="`round-summary-bottom-card-${cardIdx}`"
           :src="getCardImage(card)"
           :alt="card"
           class="w-20 h-28 object-cover rounded border-2 border-amber-300/50 shadow-lg"
@@ -475,7 +646,8 @@ const phaseLabel = computed(() => {
     dealing: '发牌',
     bidding: '亮主',
     bottom: '扣底',
-    playing: '出牌'
+    playing: '出牌',
+    scoring: '计分'
   }
   return map[phase.value] || phase.value
 })
@@ -545,6 +717,8 @@ const bottomStatusText = computed(() => {
 
 // 底牌查看弹窗状态
 const showBottomCards = ref(false)
+const showRoundSummaryBottomCards = ref(false)  // 本局总结中的底牌查看
+const roundSummaryBottomCards = ref<string[]>([])  // 本局总结的底牌
 
 function openBottomCards() {
   showBottomCards.value = true
@@ -553,6 +727,25 @@ function openBottomCards() {
 function closeBottomCards() {
   showBottomCards.value = false
 }
+
+// 打开本局总结的底牌查看
+function openRoundSummaryBottomCards() {
+  // 从round_summary中获取保存的底牌
+  if (game.round_summary && game.round_summary.bottom_cards) {
+    roundSummaryBottomCards.value = game.round_summary.bottom_cards
+  } else {
+    // 如果没有保存，尝试使用game.bottom_cards
+    roundSummaryBottomCards.value = game.bottom_cards || []
+  }
+  showRoundSummaryBottomCards.value = true
+}
+
+function closeRoundSummaryBottomCards() {
+  showRoundSummaryBottomCards.value = false
+}
+
+// 本局总结显示状态
+const showRoundSummary = ref(true)
 
 // 获取卡牌图片
 function getCardImage(cardStr: string): string {
@@ -1052,6 +1245,17 @@ function getPlayerHand(pos: Pos): string[] {
   return Array(count).fill('__BACK__')
 }
 
+// 检查玩家是否已准备（仅在scoring阶段）
+function isPlayerReady(pos: Pos): boolean {
+  if (phase.value !== 'scoring') return false
+  const player = players.value.find(p => (p.position as string)?.toUpperCase() === pos)
+  if (!player || !player.id) return false
+  return game.ready_for_next_round.ready_players?.includes(player.id) || false
+}
+
+// 是否显示准备状态（仅在scoring阶段）
+const showReadyStatus = computed(() => phase.value === 'scoring')
+
 // 连接WebSocket
 function connect() {
   if (!playerId.value) {
@@ -1089,6 +1293,39 @@ function startGame() {
     clearAllHands()
     ws.send({ type: 'start_game' })
   }
+}
+
+// 发送准备下一轮消息
+function sendReadyForNextRound() {
+  if (ws.connected && playerId.value) {
+    ws.send({ type: 'ready_for_next_round' })
+  }
+}
+
+// 检查是否已准备
+const isReadyForNextRound = computed(() => {
+  if (!playerId.value || !game.ready_for_next_round.ready_players) return false
+  return game.ready_for_next_round.ready_players.includes(playerId.value)
+})
+
+// 获取级别标签
+function getLevelLabel(level: number): string {
+  const levelMap: Record<number, string> = {
+    2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10',
+    11: 'J', 12: 'Q', 13: 'K', 14: 'A'
+  }
+  return levelMap[level] || String(level)
+}
+
+// 获取位置标签
+function getPositionLabel(position: string): string {
+  const positionMap: Record<string, string> = {
+    'NORTH': '北',
+    'SOUTH': '南',
+    'EAST': '东',
+    'WEST': '西'
+  }
+  return positionMap[position.toUpperCase()] || position
 }
 
 // 自动发牌
@@ -1277,6 +1514,12 @@ onMounted(() => {
       setTimeout(() => {
         centerNotification.value.show = false
       }, 1500)
+    } else if (msg.type === 'round_end') {
+      // 游戏结束，显示本局总结
+      game.applyRoundEnd(msg)
+    } else if (msg.type === 'ready_for_next_round_updated') {
+      // 准备状态更新
+      game.applyReadyForNextRoundUpdated(msg)
     } else if (msg.type === 'error') {
       // 处理错误信息（出牌失败等）
       if (msg.message) {

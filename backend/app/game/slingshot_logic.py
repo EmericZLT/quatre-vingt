@@ -18,8 +18,8 @@ Slingshot Logic Implementation
 - 有其他玩家用主牌管上
 """
 
-from typing import List, Dict, Tuple, Optional
-from collections import Counter
+from typing import List, Dict, Tuple, Optional, Any
+from collections import Counter, defaultdict
 from app.models.game import Card, Suit, Rank, PlayerPosition
 from app.game.card_system import CardSystem
 from app.game.card_comparison import CardComparison
@@ -160,8 +160,6 @@ class SlingshotLogic:
                 "card_types": ["tractor", "pair", "single"]  # 兼容旧接口的牌型列表
             }
         """
-        from typing import Dict, List, Any
-        
         result: Dict[str, Any] = {
             "tractors": [],
             "tractor_count": 0,
@@ -323,9 +321,6 @@ class SlingshotLogic:
         Returns:
             (拖拉机列表, 对子列表, 单牌列表)
         """
-        from app.models.game import Rank
-        from collections import defaultdict
-        
         tractors = []
         pairs = []
         singles = []
@@ -463,8 +458,6 @@ class SlingshotLogic:
         2. 级牌：只有一对主级牌和一对副级牌可以构成连对
         3. 级牌和普通牌不能混合
         """
-        from app.models.game import Rank
-        
         # 检查是否都是级牌
         is_level1 = self.card_system.is_level_card(card1)
         is_level2 = self.card_system.is_level_card(card2)

@@ -5,7 +5,7 @@ type Pos = 'NORTH'|'WEST'|'SOUTH'|'EAST'
 export const useGameStore = defineStore('game', {
   state: () => ({
     roomId: '',
-    phase: 'waiting' as 'waiting'|'dealing'|'bidding'|'playing'|'bottom',
+    phase: 'waiting' as 'waiting'|'dealing'|'bidding'|'playing'|'bottom'|'scoring',
     dealer_position: 'NORTH' as Pos,
     dealer_player_id: '',
     dealer_has_bottom: false,
@@ -22,6 +22,31 @@ export const useGameStore = defineStore('game', {
     current_player: null as string | null,  // 当前应该出牌的玩家位置
     // 仅用于演示：每家展示用的"手里标签"列表（真实游戏中只对本家给出具体牌）
     demoHands: { NORTH: [] as string[], WEST: [] as string[], SOUTH: [] as string[], EAST: [] as string[] } as Record<Pos, string[]>,
+    // 本局游戏总结信息
+    round_summary: null as null | {
+      idle_score: number
+      bottom_score: number
+      bottom_bonus: number
+      total_score: number  // 完整分数，不抹零
+      dealer_side: string  // "north_south" 或 "east_west"
+      idle_side: string
+      dealer_level_up: number
+      idle_level_up: number
+      old_north_south_level: number
+      old_east_west_level: number
+      new_north_south_level: number
+      new_east_west_level: number
+      next_dealer: string
+      next_dealer_name: string
+      bottom_cards?: string[]  // 本局底牌（用于查看）
+      tricks_won: { north_south: number; east_west: number }
+    },
+    // 准备下一轮的玩家状态
+    ready_for_next_round: {
+      ready_count: 0,
+      total_players: 0,
+      ready_players: [] as string[]
+    },
   }),
   actions: {
     applySnapshot(s: any) {
@@ -68,6 +93,18 @@ export const useGameStore = defineStore('game', {
       if (Array.isArray(s.my_hand_sorted)) {
         // 前端需知道自己位置；此处略过，仅占位
       }
+      // 处理本局总结信息
+      if (s.round_summary) {
+        this.round_summary = s.round_summary
+      }
+      // 处理准备下一轮的状态
+      if (s.ready_for_next_round) {
+        this.ready_for_next_round = {
+          ready_count: s.ready_for_next_round.ready_count || 0,
+          total_players: s.ready_for_next_round.total_players || 0,
+          ready_players: s.ready_for_next_round.ready_players || []
+        }
+      }
     },
     applyBottomUpdate(e: { bottom_cards_count?: number; dealer_has_bottom?: boolean; bottom_pending?: boolean; dealer_player_id?: string }) {
       if (typeof e.bottom_cards_count === 'number') this.bottom_cards_count = e.bottom_cards_count
@@ -95,7 +132,7 @@ export const useGameStore = defineStore('game', {
       const p = this.players.find(x => x.position === player)
       if (p) p.cards_count += 1
     },
-    applyPhaseChanged(e: { phase: 'waiting'|'dealing'|'bidding'|'playing'|'bottom' }) {
+    applyPhaseChanged(e: { phase: 'waiting'|'dealing'|'bidding'|'playing'|'bottom'|'scoring' }) {
       this.phase = e.phase
     },
     applyScoreUpdated(e: { idle_score?: number }) {
@@ -184,8 +221,29 @@ export const useGameStore = defineStore('game', {
     resetDemoHands() {
       this.demoHands = { NORTH: [], WEST: [], SOUTH: [], EAST: [] }
       this.dealt_count = 0
+    },
+    applyRoundEnd(e: { round_summary?: any; ready_count?: number; total_players?: number }) {
+      if (e.round_summary) {
+        this.round_summary = e.round_summary
+      }
+      if (typeof e.ready_count === 'number') {
+        this.ready_for_next_round.ready_count = e.ready_count
+      }
+      if (typeof e.total_players === 'number') {
+        this.ready_for_next_round.total_players = e.total_players
+      }
+    },
+    applyReadyForNextRoundUpdated(e: { player_id?: string; ready_count?: number; total_players?: number; all_ready?: boolean; ready_players?: string[] }) {
+      if (typeof e.ready_count === 'number') {
+        this.ready_for_next_round.ready_count = e.ready_count
+      }
+      if (typeof e.total_players === 'number') {
+        this.ready_for_next_round.total_players = e.total_players
+      }
+      if (Array.isArray(e.ready_players)) {
+        this.ready_for_next_round.ready_players = e.ready_players
+      }
     }
   },
 })
-
 

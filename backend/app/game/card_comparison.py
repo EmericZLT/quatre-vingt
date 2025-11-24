@@ -12,8 +12,11 @@ class CardComparison:
     def __init__(self, card_system: CardSystem, trump_suit: Optional[Suit] = None):
         self.card_system = card_system
         self.trump_suit = trump_suit
-        self.current_level = card_system.current_level
-        self.level_rank = self._get_level_rank()
+    
+    @property
+    def current_level(self) -> int:
+        """获取当前级别（从card_system动态获取，确保使用最新级别）"""
+        return self.card_system.current_level
     
     def _get_level_rank(self) -> Rank:
         """获取当前级别的牌面"""
@@ -67,7 +70,7 @@ class CardComparison:
             return True
         
         # 级牌是主牌
-        if card.rank == self.level_rank:
+        if card.rank == self._get_level_rank():
             return True
         
         # 主牌花色的牌是主牌
@@ -86,8 +89,14 @@ class CardComparison:
                 return 999
         
         # 级牌（主牌中最大，除大小王外）
-        if card.rank == self.level_rank:
-            return 900 + self._get_rank_value(card.rank)
+        if card.rank == self._get_level_rank():
+            # 主级牌：花色和主牌花色一致的级牌（无主时没有主级牌）
+            if self.trump_suit and card.suit == self.trump_suit:
+                # 主级牌：返回更高的值
+                return 950 + self._get_rank_value(card.rank)
+            else:
+                # 副级牌：所有副级牌彼此一样大，返回固定值
+                return 900
         
         # 主牌花色的其他牌
         if self.trump_suit and card.suit == self.trump_suit:
@@ -140,7 +149,7 @@ class CardComparison:
             "card": str(card),
             "is_trump": self._is_trump_card(card),
             "is_joker": card.is_joker,
-            "is_level_card": card.rank == self.level_rank,
+            "is_level_card": card.rank == self._get_level_rank(),
             "is_trump_suit": self.trump_suit and card.suit == self.trump_suit,
             "value": self._get_card_value(card)
         }
