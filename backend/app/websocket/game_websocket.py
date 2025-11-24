@@ -123,18 +123,76 @@ class ConnectionManager:
         if room_id in rooms and room_id not in self.game_states:
             self.game_states[room_id] = GameState(rooms[room_id])
         
-        # 连接成功后发送快照（只发送给当前玩家）
+        # 连接成功后发送快照给当前玩家
         await self.send_snapshot(room_id, player_id)
+        
+        # 通知房间中所有其他玩家有新玩家加入（发送更新后的玩家列表）
+        if room_id in rooms:
+            room = rooms[room_id]
+            gs = self.get_game_state(room_id)
+            if gs:
+                # 发送玩家列表更新事件给所有玩家（包括新加入的玩家）
+                players_update = {
+                    "type": "players_updated",
+                    "players": [
+                        {
+                            "id": p.id,
+                            "name": p.name,
+                            "position": p.position.value,
+                            "cards_count": len(p.cards)
+                        }
+                        for p in room.players
+                    ],
+                    "ready_to_start": {
+                        "ready_count": len(gs.players_ready_to_start) if hasattr(gs, "players_ready_to_start") else 0,
+                        "total_players": len(room.players),
+                        "ready_players": list(gs.players_ready_to_start) if hasattr(gs, "players_ready_to_start") else []
+                    } if gs.game_phase == "waiting" else None
+                }
+                await self.broadcast_to_room(json.dumps(players_update), room_id)
     
-    def disconnect(self, websocket: WebSocket, room_id: str):
+    async def disconnect(self, websocket: WebSocket, room_id: str):
         """断开连接"""
+        disconnected_player_id = None
         if room_id in self.active_connections:
+            # 找到要断开的玩家ID
+            for conn in self.active_connections[room_id]:
+                if conn.websocket == websocket:
+                    disconnected_player_id = conn.player_id
+                    break
+            
+            # 移除连接
             self.active_connections[room_id] = [
                 conn for conn in self.active_connections[room_id]
                 if conn.websocket != websocket
             ]
             if not self.active_connections[room_id]:
                 del self.active_connections[room_id]
+        
+        # 通知房间中其他玩家有玩家离开（发送更新后的玩家列表）
+        if room_id in rooms and disconnected_player_id:
+            room = rooms[room_id]
+            gs = self.get_game_state(room_id)
+            if gs:
+                # 发送玩家列表更新事件给所有剩余玩家
+                players_update = {
+                    "type": "players_updated",
+                    "players": [
+                        {
+                            "id": p.id,
+                            "name": p.name,
+                            "position": p.position.value,
+                            "cards_count": len(p.cards)
+                        }
+                        for p in room.players
+                    ],
+                    "ready_to_start": {
+                        "ready_count": len(gs.players_ready_to_start) if hasattr(gs, "players_ready_to_start") else 0,
+                        "total_players": len(room.players),
+                        "ready_players": list(gs.players_ready_to_start) if hasattr(gs, "players_ready_to_start") else []
+                    } if gs.game_phase == "waiting" else None
+                }
+                await self.broadcast_to_room(json.dumps(players_update), room_id)
     
     async def send_personal_message(self, message: str, websocket: WebSocket):
         """发送个人消息"""
@@ -788,4 +846,4 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                 )
             
     except WebSocketDisconnect:
-        manager.disconnect(websocket, room_id)
+        await manager.disconnect(websocket, room_id)

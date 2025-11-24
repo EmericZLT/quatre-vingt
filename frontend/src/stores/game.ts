@@ -283,6 +283,29 @@ export const useGameStore = defineStore('game', {
           this.ready_to_start.ready_players.push(e.player_id)
         }
       }
+    },
+    applyPlayersUpdated(e: { players?: any[]; ready_to_start?: { ready_count?: number; total_players?: number; ready_players?: string[] } }) {
+      // 更新玩家列表
+      if (Array.isArray(e.players)) {
+        this.players = e.players.map((p: any) => ({ 
+          id: p.id, 
+          name: p.name, 
+          position: p.position, 
+          cards_count: p.cards_count 
+        }))
+      }
+      // 更新准备状态（如果在waiting阶段）
+      if (e.ready_to_start && this.phase === 'waiting') {
+        if (typeof e.ready_to_start.ready_count === 'number') {
+          this.ready_to_start.ready_count = e.ready_to_start.ready_count
+        }
+        if (typeof e.ready_to_start.total_players === 'number') {
+          this.ready_to_start.total_players = e.ready_to_start.total_players
+        }
+        if (Array.isArray(e.ready_to_start.ready_players)) {
+          this.ready_to_start.ready_players = e.ready_to_start.ready_players
+        }
+      }
     }
   },
 })

@@ -1523,6 +1523,9 @@ onMounted(() => {
     } else if (msg.type === 'ready_to_start_updated') {
       // 准备开始游戏状态更新
       game.applyReadyToStartUpdated(msg)
+    } else if (msg.type === 'players_updated') {
+      // 玩家列表更新（新玩家加入或离开）
+      game.applyPlayersUpdated(msg)
     } else if (msg.type === 'error') {
       // 处理错误信息（出牌失败等）
       if (msg.message) {
