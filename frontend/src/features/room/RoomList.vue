@@ -92,6 +92,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoomStore } from '@/stores/room'
+import { getApiUrl } from '@/config/env'
 
 const router = useRouter()
 const roomStore = useRoomStore()
@@ -110,7 +111,6 @@ const canResume = ref(false)
 async function loadRooms() {
   try {
     loading.value = true
-    const { getApiUrl } = await import('@/config/env')
     const apiUrl = getApiUrl('/api/rooms')
     console.log('加载房间列表，请求 URL:', apiUrl)
     const response = await fetch(apiUrl)
@@ -132,7 +132,6 @@ async function loadRooms() {
 async function resumeRoom() {
   if (!roomStore.roomId || !roomStore.token) return
   try {
-    const { getApiUrl } = await import('@/config/env')
     const response = await fetch(getApiUrl(`/api/rooms/${roomStore.roomId}/reconnect`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -162,7 +161,6 @@ async function createRoom() {
   
   try {
     creating.value = true
-    const { getApiUrl } = await import('@/config/env')
     const apiUrl = getApiUrl('/api/rooms')
     console.log('创建房间，请求 URL:', apiUrl)
     console.log('请求数据:', { name: newRoomName.value })
@@ -200,7 +198,6 @@ async function joinRoom(roomId: string, name?: string) {
   
   try {
     joining.value[roomId] = true
-    const { getApiUrl } = await import('@/config/env')
     const response = await fetch(getApiUrl(`/api/rooms/${roomId}/join`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
