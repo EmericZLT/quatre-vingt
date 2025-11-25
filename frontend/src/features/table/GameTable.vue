@@ -516,6 +516,7 @@ import { useGameStore } from '@/stores/game'
 import { useRoomStore } from '@/stores/room'
 import PlayerArea from './PlayerArea.vue'
 import { getCardImageFromString, parseCardString } from '@/utils/cards'
+import { getWebSocketUrl } from '@/config/env'
 
 type Pos = 'NORTH' | 'WEST' | 'SOUTH' | 'EAST'
 
@@ -1260,7 +1261,7 @@ function connect() {
     return
   }
   // 构建WebSocket URL，包含player_id参数
-  const wsUrl = `ws://127.0.0.1:8000/ws/game/${roomId.value}?player_id=${playerId.value}`
+  const wsUrl = `${getWebSocketUrl(`/ws/game/${roomId.value}`)}?player_id=${playerId.value}`
   ws.connect(wsUrl)
 }
 
