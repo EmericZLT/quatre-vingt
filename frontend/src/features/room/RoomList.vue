@@ -11,6 +11,7 @@
             v-model="newRoomName"
             type="text"
             placeholder="输入房间名称"
+            data-input-type="newRoomName"
             class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
             @keyup.enter="createRoom"
           />
@@ -18,6 +19,7 @@
             v-model="playerName"
             type="text"
             placeholder="输入你的名字"
+            data-input-type="playerName"
             class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
             @keyup.enter="createRoom"
           />
@@ -33,7 +35,21 @@
 
       <!-- 房间列表 -->
       <div class="bg-slate-800 rounded-lg p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">房间列表</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-white">房间列表</h2>
+          <button
+            @click="loadRooms"
+            :disabled="loading"
+            class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:bg-slate-600 disabled:cursor-not-allowed flex items-center gap-2"
+            title="手动刷新房间列表"
+          >
+            <svg v-if="!loading" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span v-if="loading">刷新中...</span>
+            <span v-else>刷新</span>
+          </button>
+        </div>
         <div v-if="canResume" class="mb-4">
           <button
             class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
@@ -58,7 +74,7 @@
                   <span v-if="room.is_full" class="ml-2 text-red-400">(已满)</span>
                 </div>
                 <div class="text-xs text-slate-400 mt-1">
-                  玩家: {{ room.players.map(p => p.name).join(', ') || '暂无' }}
+                  玩家: {{ room.players.map((p: any) => p.name).join(', ') || '暂无' }}
                 </div>
               </div>
               <div class="flex gap-2 items-center">
@@ -67,6 +83,7 @@
                   v-model="joinPlayerNames[room.id]"
                   type="text"
                   placeholder="你的名字"
+                  :data-room-id="room.id"
                   class="px-3 py-1 rounded bg-slate-600 text-white text-sm placeholder-slate-400 w-32"
                   @keyup.enter="joinRoom(room.id)"
                 />
@@ -89,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoomStore } from '@/stores/room'
 
@@ -106,8 +123,43 @@ const joining = ref<Record<string, boolean>>({})
 const rooms = ref<any[]>([])
 const canResume = ref(false)
 
+// 保存当前聚焦的输入框信息
+let focusedInputInfo: {
+  type: 'playerName' | 'newRoomName' | 'joinRoom'
+  roomId?: string
+  selectionStart: number | null
+  selectionEnd: number | null
+} | null = null
+
 // 加载房间列表
 async function loadRooms() {
+  // 保存当前聚焦的输入框信息（仅在手动刷新时保留，自动刷新时如果输入框聚焦则跳过）
+  const activeElement = document.activeElement
+  if (activeElement && activeElement.tagName === 'INPUT') {
+    const input = activeElement as HTMLInputElement
+    const dataInputType = input.getAttribute('data-input-type')
+    const dataRoomId = input.getAttribute('data-room-id')
+    
+    if (dataInputType === 'playerName' || dataInputType === 'newRoomName') {
+      focusedInputInfo = {
+        type: dataInputType,
+        selectionStart: input.selectionStart,
+        selectionEnd: input.selectionEnd
+      }
+    } else if (dataRoomId) {
+      focusedInputInfo = {
+        type: 'joinRoom',
+        roomId: dataRoomId,
+        selectionStart: input.selectionStart,
+        selectionEnd: input.selectionEnd
+      }
+    } else {
+      focusedInputInfo = null
+    }
+  } else {
+    focusedInputInfo = null
+  }
+
   try {
     loading.value = true
     const response = await fetch('http://127.0.0.1:8000/api/rooms')
@@ -118,6 +170,26 @@ async function loadRooms() {
     console.error('Failed to load rooms:', error)
   } finally {
     loading.value = false
+  }
+
+  // 恢复焦点（仅在之前有焦点时恢复）
+  await nextTick()
+  if (focusedInputInfo) {
+    let inputToFocus: HTMLInputElement | null = null
+    if (focusedInputInfo.type === 'playerName') {
+      inputToFocus = document.querySelector('input[data-input-type="playerName"]') as HTMLInputElement
+    } else if (focusedInputInfo.type === 'newRoomName') {
+      inputToFocus = document.querySelector('input[data-input-type="newRoomName"]') as HTMLInputElement
+    } else if (focusedInputInfo.type === 'joinRoom' && focusedInputInfo.roomId) {
+      inputToFocus = document.querySelector(`input[data-room-id="${focusedInputInfo.roomId}"]`) as HTMLInputElement
+    }
+    
+    if (inputToFocus) {
+      inputToFocus.focus()
+      if (focusedInputInfo.selectionStart !== null && focusedInputInfo.selectionEnd !== null) {
+        inputToFocus.setSelectionRange(focusedInputInfo.selectionStart, focusedInputInfo.selectionEnd)
+      }
+    }
   }
 }
 
@@ -210,16 +282,34 @@ async function joinRoom(roomId: string, name?: string) {
   }
 }
 
-// 定期刷新房间列表
+// 定期刷新房间列表（只在没有输入框聚焦时刷新）
 let refreshInterval: number | null = null
+
+// 检查是否有输入框正在聚焦
+function isAnyInputFocused(): boolean {
+  const activeElement = document.activeElement
+  if (!activeElement || activeElement.tagName !== 'INPUT') {
+    return false
+  }
+  const input = activeElement as HTMLInputElement
+  return input.getAttribute('data-input-type') !== null || 
+         input.getAttribute('data-room-id') !== null
+}
+
+// 智能刷新：只在没有输入框聚焦时才刷新
+function smartRefresh() {
+  if (!isAnyInputFocused()) {
+    loadRooms()
+  }
+}
 
 onMounted(() => {
   // 尝试从本地恢复上下文
   roomStore.loadFromStorage()
   canResume.value = !!roomStore.roomId && !!roomStore.token
   loadRooms()
-  // 每3秒刷新一次房间列表
-  refreshInterval = window.setInterval(loadRooms, 3000)
+  // 每3秒智能刷新一次房间列表（只在没有输入框聚焦时）
+  refreshInterval = window.setInterval(smartRefresh, 3000)
 })
 
 // 清理定时器

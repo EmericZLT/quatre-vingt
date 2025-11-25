@@ -202,6 +202,9 @@ class GameState:
         
         # 设置新的底牌
         self.bottom_cards = [card.copy() if hasattr(card, "copy") else card for card in cards_to_discard]
+        # 同步更新 card_playing_system 中的底牌（用于计算底牌分数）
+        if self.card_playing_system:
+            self.card_playing_system.bottom_cards = self.bottom_cards.copy()
         # 重新整理庄家手牌
         sorter = CardSorter(
             current_level=self.card_system.current_level,

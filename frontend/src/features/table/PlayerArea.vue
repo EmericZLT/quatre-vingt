@@ -685,7 +685,6 @@ function handleCardClick(index: number, cardStr: string) {
   border-radius: 8px;
   padding: 8px 16px;
   box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
-  animation: pulse 2s ease-in-out infinite;
 }
 
 .ready-status-text {
@@ -694,17 +693,6 @@ function handleCardClick(index: number, cardStr: string) {
   font-size: 14px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   letter-spacing: 0.5px;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.9;
-    transform: scale(1.05);
-  }
 }
 </style>
 
