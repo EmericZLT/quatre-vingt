@@ -1260,7 +1260,8 @@ function connect() {
     return
   }
   // 构建WebSocket URL，包含player_id参数
-  const wsUrl = `ws://127.0.0.1:8000/ws/game/${roomId.value}?player_id=${playerId.value}`
+  const { getWebSocketUrl } = await import('@/config/env')
+  const wsUrl = `${getWebSocketUrl(`/ws/game/${roomId.value}`)}?player_id=${playerId.value}`
   ws.connect(wsUrl)
 }
 

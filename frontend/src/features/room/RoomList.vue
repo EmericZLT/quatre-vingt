@@ -110,12 +110,19 @@ const canResume = ref(false)
 async function loadRooms() {
   try {
     loading.value = true
-    const response = await fetch('http://127.0.0.1:8000/api/rooms')
+    const { getApiUrl } = await import('@/config/env')
+    const apiUrl = getApiUrl('/api/rooms')
+    console.log('加载房间列表，请求 URL:', apiUrl)
+    const response = await fetch(apiUrl)
+    console.log('响应状态:', response.status)
     if (response.ok) {
       rooms.value = await response.json()
+      console.log('房间列表加载成功，房间数:', rooms.value.length)
+    } else {
+      console.error('加载房间列表失败:', response.status, response.statusText)
     }
   } catch (error) {
-    console.error('Failed to load rooms:', error)
+    console.error('加载房间列表异常:', error)
   } finally {
     loading.value = false
   }
@@ -125,7 +132,8 @@ async function loadRooms() {
 async function resumeRoom() {
   if (!roomStore.roomId || !roomStore.token) return
   try {
-    const response = await fetch(`http://127.0.0.1:8000/api/rooms/${roomStore.roomId}/reconnect`, {
+    const { getApiUrl } = await import('@/config/env')
+    const response = await fetch(getApiUrl(`/api/rooms/${roomStore.roomId}/reconnect`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: roomStore.token })
@@ -154,22 +162,32 @@ async function createRoom() {
   
   try {
     creating.value = true
-    const response = await fetch('http://127.0.0.1:8000/api/rooms', {
+    const { getApiUrl } = await import('@/config/env')
+    const apiUrl = getApiUrl('/api/rooms')
+    console.log('创建房间，请求 URL:', apiUrl)
+    console.log('请求数据:', { name: newRoomName.value })
+    
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newRoomName.value })
     })
     
+    console.log('响应状态:', response.status, response.statusText)
+    
     if (response.ok) {
       const room = await response.json()
+      console.log('房间创建成功:', room)
       // 加入房间
       await joinRoom(room.id, playerName.value)
     } else {
-      alert('创建房间失败')
+      const errorText = await response.text()
+      console.error('创建房间失败，响应:', errorText)
+      alert(`创建房间失败: ${response.status} ${response.statusText}\n${errorText}`)
     }
   } catch (error) {
-    console.error('Failed to create room:', error)
-    alert('创建房间失败')
+    console.error('创建房间异常:', error)
+    alert(`创建房间失败: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     creating.value = false
   }
@@ -182,7 +200,8 @@ async function joinRoom(roomId: string, name?: string) {
   
   try {
     joining.value[roomId] = true
-    const response = await fetch(`http://127.0.0.1:8000/api/rooms/${roomId}/join`, {
+    const { getApiUrl } = await import('@/config/env')
+    const response = await fetch(getApiUrl(`/api/rooms/${roomId}/join`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ player_name: playerNameToUse })
