@@ -12,6 +12,7 @@
             type="text"
             placeholder="输入房间名称"
             data-input-type="newRoomName"
+            maxlength="15"
             class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
             @keyup.enter="createRoom"
           />
@@ -20,6 +21,7 @@
             type="text"
             placeholder="输入你的名字"
             data-input-type="playerName"
+            maxlength="8"
             class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
             @keyup.enter="createRoom"
           />
@@ -84,6 +86,7 @@
                   type="text"
                   placeholder="你的名字"
                   :data-room-id="room.id"
+                  maxlength="8"
                   class="px-3 py-1 rounded bg-slate-600 text-white text-sm placeholder-slate-400 w-32"
                   @keyup.enter="joinRoom(room.id)"
                 />
@@ -229,18 +232,35 @@ async function resumeRoom() {
 
 // 创建房间
 async function createRoom() {
-  if (!newRoomName.value || !playerName.value) return
+  // 前端验证
+  const roomName = newRoomName.value.trim()
+  const name = playerName.value.trim()
+  
+  if (!roomName || !name) {
+    alert('房间名和玩家名不能为空')
+    return
+  }
+  
+  if (roomName.length > 15) {
+    alert('房间名不能超过15个字符')
+    return
+  }
+  
+  if (name.length > 8) {
+    alert('玩家名不能超过8个字符')
+    return
+  }
   
   try {
     creating.value = true
     const apiUrl = getApiUrl('/api/rooms')
     console.log('创建房间，请求 URL:', apiUrl)
-    console.log('请求数据:', { name: newRoomName.value })
+    console.log('请求数据:', { name: roomName })
     
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newRoomName.value })
+      body: JSON.stringify({ name: roomName })
     })
     
     console.log('响应状态:', response.status, response.statusText)
@@ -249,11 +269,11 @@ async function createRoom() {
       const room = await response.json()
       console.log('房间创建成功:', room)
       // 加入房间
-      await joinRoom(room.id, playerName.value)
+      await joinRoom(room.id, name)
     } else {
-      const errorText = await response.text()
-      console.error('创建房间失败，响应:', errorText)
-      alert(`创建房间失败: ${response.status} ${response.statusText}\n${errorText}`)
+      const errorData = await response.json().catch(() => ({ detail: response.statusText }))
+      console.error('创建房间失败，响应:', errorData)
+      alert(`创建房间失败: ${errorData.detail || response.statusText}`)
     }
   } catch (error) {
     console.error('创建房间异常:', error)
@@ -265,8 +285,17 @@ async function createRoom() {
 
 // 加入房间
 async function joinRoom(roomId: string, name?: string) {
-  const playerNameToUse = name || joinPlayerNames.value[roomId]
-  if (!playerNameToUse) return
+  const playerNameToUse = (name || joinPlayerNames.value[roomId])?.trim()
+  if (!playerNameToUse) {
+    alert('请输入玩家名')
+    return
+  }
+  
+  // 前端验证
+  if (playerNameToUse.length > 8) {
+    alert('玩家名不能超过8个字符')
+    return
+  }
   
   try {
     joining.value[roomId] = true
@@ -287,8 +316,8 @@ async function joinRoom(roomId: string, name?: string) {
         router.push(`/game/${room.id}`)
       }
     } else {
-      const error = await response.json()
-      alert(error.detail || '加入房间失败')
+      const errorData = await response.json().catch(() => ({ detail: response.statusText }))
+      alert(errorData.detail || '加入房间失败')
     }
   } catch (error) {
     console.error('Failed to join room:', error)

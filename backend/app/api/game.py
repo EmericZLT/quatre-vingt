@@ -29,8 +29,15 @@ async def get_rooms() -> List[GameRoom]:
 @router.post("/rooms")
 async def create_room(request: CreateRoomRequest) -> GameRoom:
     """Create a new game room"""
+    # 验证房间名长度
+    room_name = request.name.strip()
+    if not room_name:
+        raise HTTPException(status_code=400, detail="房间名不能为空")
+    if len(room_name) > 15:
+        raise HTTPException(status_code=400, detail="房间名不能超过15个字符")
+    
     room_id = str(uuid.uuid4())
-    room = GameRoom(id=room_id, name=request.name)
+    room = GameRoom(id=room_id, name=room_name)
     rooms[room_id] = room
     return room
 
@@ -47,12 +54,23 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
     if room_id not in rooms:
         raise HTTPException(status_code=404, detail="Room not found")
     
+    # 验证玩家名长度
+    player_name = request.player_name.strip()
+    if not player_name:
+        raise HTTPException(status_code=400, detail="玩家名不能为空")
+    if len(player_name) > 8:
+        raise HTTPException(status_code=400, detail="玩家名不能超过8个字符")
+    
     room = rooms[room_id]
     
-    # 检查玩家是否已经在房间中
-    existing_player = next((p for p in room.players if p.name == request.player_name), None)
+    # 检查玩家是否已经在房间中（用于重连）
+    existing_player = next((p for p in room.players if p.name == player_name), None)
     if existing_player:
         return room
+    
+    # 检查房间中是否已有同名玩家（不允许重名）
+    if any(p.name == player_name for p in room.players):
+        raise HTTPException(status_code=400, detail="该名称已被使用，请选择其他名称")
     
     if room.is_full:
         raise HTTPException(status_code=400, detail="Room is full")
@@ -67,7 +85,7 @@ async def join_room(room_id: str, request: JoinRoomRequest) -> GameRoom:
     
     player = Player(
         id=str(uuid.uuid4()),
-        name=request.player_name,
+        name=player_name,
         position=available_positions[0]
     )
     # 默认准备就绪
