@@ -952,17 +952,17 @@ function handleSlingshotFailure() {
   // 由于后端发送的card_played事件中包含了slingshot_failed标记的临时牌
   // 我们需要从game store的current_trick中移除这些牌
   if (game.current_trick && game.current_trick.length > 0) {
-    // 找到并移除甩牌失败的牌
-    const trickEntry = game.current_trick.find(
-      (entry: any) => entry.player_id === playerId.value && entry.slingshot_failed
+    // 找到并移除所有甩牌失败的牌（可能不止一个玩家）
+    const failedEntries = game.current_trick.filter(
+      (entry: any) => entry.slingshot_failed
     )
-    if (trickEntry) {
-      // 从current_trick中移除这个条目
-      const index = game.current_trick.indexOf(trickEntry)
+    // 从后往前移除，避免索引问题
+    failedEntries.forEach((entry: any) => {
+      const index = game.current_trick.indexOf(entry)
       if (index >= 0) {
         game.current_trick.splice(index, 1)
       }
-    }
+    })
   }
   
   // 将甩出的牌返回手牌（除了需要强制打出的牌）
@@ -1508,31 +1508,35 @@ onMounted(() => {
     } else if (msg.type === 'card_played') {
       // 如果一轮完成（trick_complete为true），不清空current_trick，等待trick_complete事件处理
       if (!msg.trick_complete) {
-        // 如果是新的一轮开始（领出），立即清空上一轮的牌
-        if (msg.current_trick && msg.current_trick.length === 1) {
-          // 清除之前的延迟清空定时器
-          if (typeof window !== 'undefined' && (window as any).__trickCompleteTimeout) {
-            clearTimeout((window as any).__trickCompleteTimeout)
-            delete (window as any).__trickCompleteTimeout
+        // 如果是甩牌失败的情况，不要清空current_trick，让牌显示1.5秒
+        if (msg.slingshot_failed) {
+          // 甩牌失败时，保留current_trick中的牌用于显示
+          // 记录甩出的牌（用于后续处理）
+          if (msg.player_id === playerId.value) {
+            slingshotFailedCards.value = msg.cards || []
           }
-          // 新的一轮开始，立即清空上一轮的牌
-          game.current_trick = []
-          // 重置当前轮次最大玩家
-          currentTrickMaxPlayer.value = null
-        } else if (msg.current_trick && msg.current_trick.length === 0) {
-          // 如果current_trick为空，说明后端已经清空，前端也应该清空
-          game.current_trick = []
+        } else {
+          // 如果是新的一轮开始（领出），立即清空上一轮的牌
+          if (msg.current_trick && msg.current_trick.length === 1) {
+            // 清除之前的延迟清空定时器
+            if (typeof window !== 'undefined' && (window as any).__trickCompleteTimeout) {
+              clearTimeout((window as any).__trickCompleteTimeout)
+              delete (window as any).__trickCompleteTimeout
+            }
+            // 新的一轮开始，立即清空上一轮的牌
+            game.current_trick = []
+            // 重置当前轮次最大玩家
+            currentTrickMaxPlayer.value = null
+          } else if (msg.current_trick && msg.current_trick.length === 0) {
+            // 如果current_trick为空，说明后端已经清空，前端也应该清空
+            game.current_trick = []
+          }
         }
       }
       
       // 更新当前轮次最大玩家（仅在playing阶段且庄家已扣底后显示）
       if (msg.current_trick_max_player && phase.value === 'playing' && !bottomPendingRef.value) {
         currentTrickMaxPlayer.value = msg.current_trick_max_player
-      }
-      
-      // 如果是甩牌失败的情况，记录甩出的牌
-      if (msg.slingshot_failed && msg.player_id === playerId.value) {
-        slingshotFailedCards.value = msg.cards || []
       }
       
       // 出牌后，如果是自己出的牌，清空选择

@@ -506,6 +506,9 @@ class CardPlayingSystem:
         elif len(cards) == 2:
             if self._is_pair(cards):
                 return CardType.PAIR
+            else:
+                # 两张牌且不是对子，为甩牌
+                return CardType.SLINGSHOT
         elif len(cards) > 2:
             if self.tractor_logic.is_tractor(cards):
                 return CardType.TRACTOR

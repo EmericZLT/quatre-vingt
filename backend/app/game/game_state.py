@@ -202,6 +202,11 @@ class GameState:
         
         # 设置新的底牌
         self.bottom_cards = [card.copy() if hasattr(card, "copy") else card for card in cards_to_discard]
+        
+        # 同步更新 card_playing_system 的底牌（如果已初始化）
+        if self.card_playing_system:
+            self.card_playing_system.bottom_cards = self.bottom_cards.copy()
+        
         # 重新整理庄家手牌
         sorter = CardSorter(
             current_level=self.card_system.current_level,
@@ -1051,6 +1056,18 @@ class GameState:
         # 注意：这里不检查players_ready_to_start，因为所有玩家已经通过ready_for_next_round准备好了
         if self.fixed_dealer_position is not None:
             self.dealer_position = self.fixed_dealer_position
+        
+        # 根据新的庄家位置确定对应的级别，并更新card_system和bidding_system
+        if self.dealer_position in [PlayerPosition.NORTH, PlayerPosition.SOUTH]:
+            new_dealer_level = self.north_south_level
+        else:
+            new_dealer_level = self.east_west_level
+        
+        # 更新card_system的current_level为新庄家级别（因为级牌以庄家级别为准）
+        self.card_system.set_level(new_dealer_level)
+        # 更新bidding_system使用新庄家级别
+        self.bidding_system = BiddingSystem(new_dealer_level)
+        
         self.room.status = GameStatus.PLAYING
         self.game_phase = "dealing"
         self.trump_locked = False
@@ -1187,21 +1204,19 @@ class GameState:
                          for card in self.card_playing_system.bottom_cards)
         
         # 使用领出者的牌型判断倍率
+        # 注意：必须在_save_and_reset_trick之前获取，因为_save_and_reset_trick可能会清空current_trick_with_player
         led_cards = self._get_led_cards_from_current_trick()
         if led_cards:
             multiplier = self.card_playing_system._get_last_trick_multiplier(led_cards)
             bonus = bottom_score * multiplier
-            if bonus:
-                self.card_playing_system.idle_score += bonus
-                # 保存扣底信息用于展示
-                self.bottom_bonus_info = {
-                    "bottom_score": bottom_score,
-                    "multiplier": multiplier,
-                    "bonus": bonus
-                }
-                print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
-            else:
-                self.bottom_bonus_info = None
+            self.card_playing_system.idle_score += bonus
+            # 保存扣底信息用于展示
+            self.bottom_bonus_info = {
+                "bottom_score": bottom_score,
+                "multiplier": multiplier,
+                "bonus": bonus
+            }
+            print(f"[抠底] 闲家赢，底牌分：{bottom_score}，倍数：{multiplier}，抠底得分：+{bonus}")
         else:
             self.bottom_bonus_info = None
     
