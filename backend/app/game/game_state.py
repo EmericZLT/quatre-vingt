@@ -202,9 +202,6 @@ class GameState:
         
         # 设置新的底牌
         self.bottom_cards = [card.copy() if hasattr(card, "copy") else card for card in cards_to_discard]
-        # 同步更新 card_playing_system 中的底牌（用于计算底牌分数）
-        if self.card_playing_system:
-            self.card_playing_system.bottom_cards = self.bottom_cards.copy()
         # 重新整理庄家手牌
         sorter = CardSorter(
             current_level=self.card_system.current_level,
@@ -1025,7 +1022,7 @@ class GameState:
     
     def start_next_round(self) -> bool:
         """
-        开始下一轮游戏
+        开始下一轮游戏（当所有玩家都准备好时自动调用）
         
         Returns:
             是否成功开始
@@ -1044,12 +1041,55 @@ class GameState:
                 self.fixed_dealer_position = self.dealer_position
         
         # 调用end_round来重置状态（但不改变庄家，因为已经设置好了）
-        # 注意：end_round会重置game_phase为waiting，但我们需要保持waiting状态
+        # 注意：end_round会重置game_phase为waiting，但我们会立即开始下一局
         self.end_round(self.idle_score)
-        self.game_phase = "waiting"  # 保持waiting状态，等待房主开始下一局
         
         # 清空round_summary
         self.round_summary = None
+        
+        # 直接开始下一轮游戏（不等待玩家再次准备）
+        # 注意：这里不检查players_ready_to_start，因为所有玩家已经通过ready_for_next_round准备好了
+        if self.fixed_dealer_position is not None:
+            self.dealer_position = self.fixed_dealer_position
+        self.room.status = GameStatus.PLAYING
+        self.game_phase = "dealing"
+        self.trump_locked = False
+        self.dealer_has_bottom = False
+        self.bottom_pending = False
+        self.bidding_turn_player_id = None
+        self._bidding_queue = []
+        
+        # 创建并洗牌
+        deck = self.card_system.create_deck()
+        self.card_system.shuffle_deck()
+        
+        # 前100张作为发牌区，后8张作为底牌
+        self.dealing_deck = deck[0:100]
+        self.bottom_cards = deck[100:108]
+        
+        # 清空玩家手牌
+        for p in self.room.players:
+            p.cards = []
+        
+        # 清空亮主记录
+        self.bidding_cards = {}
+        
+        # 重置分数
+        self.idle_score = 0
+        
+        # 清空出牌记录
+        self.current_trick = []
+        self.current_trick_with_player = []
+        self.last_trick = []
+        self.trick_leader = None
+        
+        # 清空扣底信息
+        self.bottom_bonus_info = None
+        
+        # 发牌顺序：从庄家开始
+        self._set_dealing_order_from_dealer()
+        
+        self.dealt_count = 0
         
         return True
     

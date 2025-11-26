@@ -834,8 +834,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                         # 如果所有玩家都ready，自动开始下一轮
                         if result.get("all_ready"):
                             if gs.start_next_round():
-                                await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": "waiting"}), room_id)
+                                # 下一轮已开始，进入发牌阶段
+                                await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": "dealing"}), room_id)
                                 await manager.send_snapshot(room_id)
+                                
+                                # 自动开始发牌（类似ready_to_start_game的逻辑）
+                                async def auto_deal_task():
+                                    gs = manager.get_game_state(room_id)
+                                    if gs:
+                                        while gs.dealt_count < 100 and gs.game_phase == "dealing":
+                                            await manager.handle_deal_tick(room_id)
+                                            await asyncio.sleep(0.1)  # 每0.1秒发一张牌
+                                asyncio.create_task(auto_deal_task())
                     else:
                         await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "准备失败")}), websocket)
             else:
