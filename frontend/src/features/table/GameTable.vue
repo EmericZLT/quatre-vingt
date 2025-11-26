@@ -454,6 +454,8 @@
           :src="getCardImage(card)"
           :alt="card"
           class="w-20 h-28 object-cover rounded border-2 border-amber-300/50 shadow-lg"
+          loading="eager"
+          decoding="async"
           @error="handleImageError"
         />
       </div>
@@ -508,7 +510,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useWsStore } from '@/stores/ws'
@@ -720,16 +722,37 @@ function closeBottomCards() {
   showBottomCards.value = false
 }
 
+// 预加载图片
+function preloadCardImages(cardStrings: string[]) {
+  cardStrings.forEach(cardStr => {
+    const img = new Image()
+    img.src = getCardImage(cardStr)
+  })
+}
+
 // 打开本局总结的底牌查看
-function openRoundSummaryBottomCards() {
+async function openRoundSummaryBottomCards() {
   // 从round_summary中获取保存的底牌
+  let cards: string[] = []
   if (game.round_summary && game.round_summary.bottom_cards) {
-    roundSummaryBottomCards.value = game.round_summary.bottom_cards
+    cards = game.round_summary.bottom_cards
   } else {
     // 如果没有保存，尝试使用game.bottom_cards
-    roundSummaryBottomCards.value = game.bottom_cards || []
+    cards = game.bottom_cards || []
   }
+  
+  // 预加载所有底牌图片
+  if (cards.length > 0) {
+    preloadCardImages(cards)
+    // 等待一帧，让浏览器开始加载图片
+    await new Promise(resolve => requestAnimationFrame(resolve))
+  }
+  
+  // 设置数据并显示弹窗
+  roundSummaryBottomCards.value = cards
   showRoundSummaryBottomCards.value = true
+  // 使用 nextTick 确保DOM已更新
+  await nextTick()
 }
 
 function closeRoundSummaryBottomCards() {
@@ -1286,6 +1309,11 @@ function clearAllHands() {
 // 发送准备下一轮消息
 function sendReadyForNextRound() {
   if (ws.connected && playerId.value) {
+    // 乐观更新：立即更新本地状态，不等待后端响应
+    if (!game.ready_for_next_round.ready_players.includes(playerId.value)) {
+      game.ready_for_next_round.ready_players.push(playerId.value)
+      game.ready_for_next_round.ready_count = game.ready_for_next_round.ready_players.length
+    }
     ws.send({ type: 'ready_for_next_round' })
   }
 }
@@ -1293,6 +1321,11 @@ function sendReadyForNextRound() {
 // 准备开始游戏（waiting阶段）
 function sendReadyToStart() {
   if (ws.connected && playerId.value) {
+    // 乐观更新：立即更新本地状态，不等待后端响应
+    if (!game.ready_to_start.ready_players.includes(playerId.value)) {
+      game.ready_to_start.ready_players.push(playerId.value)
+      game.ready_to_start.ready_count = game.ready_to_start.ready_players.length
+    }
     ws.send({ type: 'ready_to_start_game' })
   }
 }
@@ -1360,7 +1393,14 @@ onMounted(() => {
       
       // 只更新自己的手牌
       if (playerPos === myPosition.value && msg.sorted_hand && Array.isArray(msg.sorted_hand)) {
+        // 使用 nextTick 确保立即渲染，避免批量更新导致的延迟
         myHand.value = [...msg.sorted_hand]
+        nextTick(() => {
+          // 确保DOM已更新
+          if (myPosition.value) {
+            playersCardsCount.value[myPosition.value] = myHand.value.length
+          }
+        })
       }
       // 使用后端提供的 players_cards_count 实时同步各家数量（含自己）
       if (msg.players_cards_count && typeof msg.players_cards_count === 'object') {
@@ -1370,7 +1410,8 @@ onMounted(() => {
           const pos = toPos(k)
           if (pos) playersCardsCount.value[pos] = m[k]
         })
-        if (myPosition.value) {
+        // 如果已经更新了自己的手牌，确保数量同步
+        if (myPosition.value && playerPos === myPosition.value) {
           playersCardsCount.value[myPosition.value] = myHand.value.length
         }
       }
