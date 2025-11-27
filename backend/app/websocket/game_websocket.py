@@ -67,6 +67,9 @@ class ConnectionManager:
             room_id: 房间ID
             player_id: 玩家ID（必须已在房间中）
         """
+        # 必须先 accept，否则无法 close
+        await websocket.accept()
+        
         # 处理缺少 player_id 的兼容情况（仅允许 demo 房间）
         if not player_id:
             if room_id != "demo":
@@ -109,8 +112,6 @@ class ConnectionManager:
             if not player:
                 await websocket.close(code=1008, reason="Player not in room")
                 return
-        
-        await websocket.accept()
         
         if room_id not in self.active_connections:
             self.active_connections[room_id] = []

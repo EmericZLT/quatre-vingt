@@ -267,11 +267,11 @@ function getHandAreaClass(): string {
   return `${baseClass} ${positionClass}`
 }
 
-// 计算偏移量：当前玩家使用较大偏移（15px），其他玩家使用较小偏移（8px）以堆叠更紧密
+// 计算偏移量：当前玩家使用较大偏移（18px），其他玩家使用较小偏移（8px）以堆叠更紧密
 const offsetStep = computed(() => {
   // 当前玩家的手牌需要看清楚，使用较大偏移
   // 其他玩家的背面牌可以堆叠更紧密
-  return props.isCurrentPlayer ? 15 : 8
+  return props.isCurrentPlayer ? 18 : 8
 })
 
 // 计算手牌总宽度（横向）或总高度（纵向）
@@ -327,6 +327,9 @@ function getCardStyle(index: number): Record<string, string> {
   const cardWidth = 60
   const cardHeight = 84
   
+  // 检查是否悬停
+  const isHovered = hoveredIndex.value === index && props.selectable
+  
   // 根据位置确定堆叠方向
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
     // 横向堆叠（左右方向）：后面的卡向右偏移
@@ -336,11 +339,16 @@ function getCardStyle(index: number): Record<string, string> {
     const totalWidth = handTotalSize.value
     const centerOffset = totalWidth / 2
     
+    // 悬停时向上移动15px，保持垂直居中
+    const transform = isHovered 
+      ? 'translateY(calc(-50% - 15px))' 
+      : 'translateY(-50%)'
+    
     return {
       left: `calc(50% - ${centerOffset}px + ${offset}px)`,
       top: '50%',
-      zIndex: `${index + 1}`, // 后面的卡在上层
-      transform: 'translateY(-50%)'
+      zIndex: `${index + 1}`, // 后面的卡在上层，保持堆叠顺序
+      transform: transform
     }
   } else {
     // 纵向堆叠（上下方向）：后面的卡向下偏移
@@ -349,11 +357,16 @@ function getCardStyle(index: number): Record<string, string> {
     const totalHeight = handTotalSize.value
     const centerOffset = totalHeight / 2
     
+    // 悬停时向上移动15px，保持水平居中
+    const transform = isHovered 
+      ? 'translateX(-50%) translateY(-15px)' 
+      : 'translateX(-50%)'
+    
     return {
       top: `calc(50% - ${centerOffset}px + ${offset}px)`,
       left: '50%',
-      zIndex: `${index + 1}`, // 后面的卡在上层
-      transform: 'translateX(-50%)'
+      zIndex: `${index + 1}`, // 后面的卡在上层，保持堆叠顺序
+      transform: transform
     }
   }
 }
@@ -618,8 +631,7 @@ function handleCardClick(index: number, cardStr: string) {
 }
 
 .card-stack-item.selectable.hovered {
-  transform: scale(1.1) !important;
-  z-index: 9999 !important;
+  /* transform 已在 getCardStyle 中处理，这里只设置阴影效果 */
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.45);
 }
 
