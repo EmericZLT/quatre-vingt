@@ -552,6 +552,26 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                             asyncio.create_task(auto_deal_task())
                     else:
                         await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "准备失败")}), websocket)
+            elif msg_type == "cancel_ready_to_start_game":
+                # 玩家取消准备开始游戏
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法取消准备"}), websocket)
+                else:
+                    result = gs.cancel_ready_to_start_game(player_id_current)
+                    if result.get("success"):
+                        # 广播取消准备状态更新
+                        ready_event = {
+                            "type": "ready_to_start_updated",
+                            "player_id": player_id_current,
+                            "ready_count": result.get("ready_count", 0),
+                            "total_players": result.get("total_players", 0),
+                            "all_ready": False,
+                            "ready_players": result.get("ready_players", [])
+                        }
+                        await manager.broadcast_to_room(json.dumps(ready_event), room_id)
+                    else:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": result.get("message", "取消准备失败")}), websocket)
             elif msg_type == "deal_tick":
                 # 发一张牌
                 if not room or not player_id_current or (room.owner_id and player_id_current != room.owner_id):

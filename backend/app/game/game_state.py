@@ -993,6 +993,34 @@ class GameState:
             "game_started": False
         }
     
+    def cancel_ready_to_start_game(self, player_id: str) -> Dict[str, Any]:
+        """
+        玩家取消准备开始游戏（waiting阶段使用）
+        
+        Args:
+            player_id: 玩家ID
+            
+        Returns:
+            包含取消准备后的状态信息
+        """
+        if self.game_phase != "waiting":
+            return {"success": False, "message": "当前不在等待阶段"}
+        
+        # 验证玩家是否在房间中
+        player = self.get_player_by_id(player_id)
+        if not player:
+            return {"success": False, "message": "玩家不存在"}
+        
+        # 从ready集合中移除玩家
+        self.players_ready_to_start.discard(player_id)
+        
+        return {
+            "success": True,
+            "ready_count": len(self.players_ready_to_start),
+            "total_players": len(self.room.players),
+            "ready_players": list(self.players_ready_to_start)
+        }
+    
     def ready_for_next_round(self, player_id: str) -> Dict[str, Any]:
         """
         玩家准备进入下一轮

@@ -20,6 +20,7 @@ export const useGameStore = defineStore('game', {
     current_trick: [] as Array<{ player_id: string; player_position: string; cards: string[] }>,
     last_trick: [] as Array<{ player_id: string; player_position: string; cards: string[] }>,
     current_player: null as string | null,  // 当前应该出牌的玩家位置
+    waitingForNextTrick: false,  // 标志：一轮刚结束，等待新一轮开始（用于保留上一轮的牌显示）
     // 仅用于演示：每家展示用的"手里标签"列表（真实游戏中只对本家给出具体牌）
     demoHands: { NORTH: [] as string[], WEST: [] as string[], SOUTH: [] as string[], EAST: [] as string[] } as Record<Pos, string[]>,
     // 本局游戏总结信息
@@ -72,15 +73,22 @@ export const useGameStore = defineStore('game', {
         this.bottom_cards = s.bottom_cards
       }
       if (Array.isArray(s.current_trick)) {
-        // 兼容旧的card字段，转换为cards数组
-        this.current_trick = s.current_trick.map((item: any) => {
-          if (item.cards) {
-            return { ...item, cards: item.cards }
-          } else if (item.card) {
-            return { ...item, cards: [item.card] }
-          }
-          return item
-        })
+        // 如果一轮刚结束（waitingForNextTrick为true）且后端发送空的current_trick，不要清空前端的牌
+        // 这样可以让玩家看到上一轮的4张牌，直到新一轮第一名玩家出牌
+        if (this.waitingForNextTrick && s.current_trick.length === 0) {
+          // 保持current_trick不变，不清空
+          console.log('[GameStore] applySnapshot: 保留上一轮的牌显示，等待新一轮开始')
+        } else {
+          // 兼容旧的card字段，转换为cards数组
+          this.current_trick = s.current_trick.map((item: any) => {
+            if (item.cards) {
+              return { ...item, cards: item.cards }
+            } else if (item.card) {
+              return { ...item, cards: [item.card] }
+            }
+            return item
+          })
+        }
       }
       if (Array.isArray(s.last_trick)) {
         // 兼容旧的card字段，转换为cards数组
@@ -148,6 +156,11 @@ export const useGameStore = defineStore('game', {
     },
     applyPhaseChanged(e: { phase: 'waiting'|'dealing'|'bidding'|'playing'|'bottom'|'scoring' }) {
       this.phase = e.phase
+      // 进入新阶段时，重置waitingForNextTrick标志
+      if (e.phase === 'dealing' || e.phase === 'waiting') {
+        this.waitingForNextTrick = false
+        console.log('[GameStore] applyPhaseChanged: 重置waitingForNextTrick=false')
+      }
     },
     applyScoreUpdated(e: { idle_score?: number }) {
       if (typeof e.idle_score === 'number') this.idle_score = e.idle_score
@@ -164,11 +177,15 @@ export const useGameStore = defineStore('game', {
       else this.tricks_won.east_west += 1
     },
     applyCardPlayed(e: { current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string; slingshot_failed?: boolean }>; trick_complete?: boolean; current_player?: string; slingshot_failed?: boolean }) {
-      // 如果一轮完成（trick_complete为true），不清空current_trick，让trick_complete事件处理
+      // 如果一轮完成（trick_complete为true），保留current_trick，不清空，等待新一轮开始
       if (e.trick_complete) {
-        // 一轮完成，不清空current_trick，等待trick_complete事件更新
-        // 但需要更新current_trick以显示当前出牌
-        if (Array.isArray(e.current_trick)) {
+        // 一轮完成，保留current_trick中的4张牌，不清空
+        // 设置标志，表示一轮刚结束，等待新一轮开始
+        this.waitingForNextTrick = true
+        console.log('[GameStore] applyCardPlayed: 一轮完成，设置waitingForNextTrick=true')
+        
+        if (Array.isArray(e.current_trick) && e.current_trick.length > 0) {
+          // 更新current_trick为包含4张牌的数据（第四名玩家刚出的牌）
           this.current_trick = e.current_trick.map((item: any) => {
             const mapped: any = {}
             if (item.cards) {
@@ -178,8 +195,20 @@ export const useGameStore = defineStore('game', {
             }
             return { ...item, ...mapped }
           })
+          console.log('[GameStore] applyCardPlayed: 更新current_trick为4张牌')
+        } else {
+          // 如果current_trick为空或未定义，保持当前的current_trick不变（不清空）
+          // 这样可以让上一轮的牌继续显示，直到新一轮开始
+          console.log('[GameStore] applyCardPlayed: 保持current_trick不变')
         }
       } else if (Array.isArray(e.current_trick)) {
+        // 如果是新的一轮开始（领出，current_trick.length === 1），先清空上一轮的牌
+        if (e.current_trick.length === 1 && !e.slingshot_failed) {
+          // 新的一轮开始，清空上一轮的牌，并清除标志
+          console.log('[GameStore] applyCardPlayed: 新一轮开始，清空上一轮的牌，设置waitingForNextTrick=false')
+          this.current_trick = []
+          this.waitingForNextTrick = false
+        }
         // 兼容旧的card字段，转换为cards数组
         this.current_trick = e.current_trick.map((item: any) => {
           const mapped: any = {}
@@ -191,12 +220,17 @@ export const useGameStore = defineStore('game', {
           // 保留其他字段，包括slingshot_failed标记
           return { ...item, ...mapped }
         })
+        console.log('[GameStore] applyCardPlayed: 更新current_trick，长度=', this.current_trick.length)
       }
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player
       }
     },
     applyTrickComplete(e: { last_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; tricks_won?: { north_south: number; east_west: number }; current_player?: string; idle_score?: number }) {
+      // 一轮完成，设置标志
+      this.waitingForNextTrick = true
+      console.log('[GameStore] applyTrickComplete: 设置waitingForNextTrick=true')
+      
       if (Array.isArray(e.last_trick)) {
         // 兼容旧的card字段，转换为cards数组
         this.last_trick = e.last_trick.map((item: any) => {
@@ -209,9 +243,10 @@ export const useGameStore = defineStore('game', {
         })
       }
       // 如果提供了current_trick，更新它（用于延迟显示）
-      // 注意：不清空current_trick，让前端延迟2秒后清空（在GameTable.vue中处理）
-      if (Array.isArray(e.current_trick)) {
+      // 注意：不清空current_trick，保留上一轮的4张牌，等待新一轮第一名玩家出牌时再清空
+      if (Array.isArray(e.current_trick) && e.current_trick.length > 0) {
         // 兼容旧的card字段，转换为cards数组
+        // 更新current_trick为last_trick的副本（包含4张牌）
         this.current_trick = e.current_trick.map((item: any) => {
           if (item.cards) {
             return { ...item, cards: item.cards }
@@ -220,8 +255,11 @@ export const useGameStore = defineStore('game', {
           }
           return item
         })
+        console.log('[GameStore] applyTrickComplete: 更新current_trick，长度=', this.current_trick.length)
+      } else {
+        console.log('[GameStore] applyTrickComplete: 保持current_trick不变')
       }
-      // 如果没有提供current_trick，保持当前值不变（不清空）
+      // 如果没有提供current_trick或current_trick为空，保持当前值不变（不清空，保留上一轮的牌）
       if (e.tricks_won) {
         this.tricks_won = e.tricks_won
       }

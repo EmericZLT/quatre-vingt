@@ -585,6 +585,8 @@ function handleCardClick(index: number, cardStr: string) {
   position: relative;
   min-height: 80px;
   min-width: 120px;
+  /* 确保手牌区域显示在已打出的牌（z-index: 15）之上 */
+  z-index: 25;
 }
 
 /* 横向排列（北、南） */
@@ -633,12 +635,14 @@ function handleCardClick(index: number, cardStr: string) {
 .card-stack-item.selectable.hovered {
   /* transform 已在 getCardStyle 中处理，这里只设置阴影效果 */
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.45);
+  /* 不改变 z-index，保持原有堆叠顺序（左边的牌在下方，右边的牌在上方） */
 }
 
 .card-stack-item.selected {
   outline: 2px solid rgba(16, 185, 129, 0.9);
   outline-offset: 2px;
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+  /* 不改变 z-index，保持原有堆叠顺序（左边的牌在下方，右边的牌在上方） */
 }
 
 .card-image {

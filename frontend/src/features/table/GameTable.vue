@@ -20,30 +20,21 @@
           </div>
         </div>
         <div class="flex gap-2">
-          <!-- 自动连接，无需手动按钮 -->
-          <button v-if="false"></button>
-          <template v-else>
-            <button 
-              @click="disconnect"
-              class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
-            >
-              断开连接
-            </button>
-            <button
-              v-if="phase === 'playing' && lastTrickCards.length > 0"
-              @click="openLastTrick"
-              class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
-            >
-              上轮
-            </button>
-            <button
-              v-if="isDealer && dealerHasBottomRef && bottomCardsCount > 0"
-              @click="openBottomCards"
-              class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
-            >
-              查看底牌
-            </button>
-          </template>
+          <!-- 断开连接按钮已隐藏，不允许用户主动断开连接 -->
+          <button
+            v-if="phase === 'playing' && lastTrickCards.length > 0"
+            @click="openLastTrick"
+            class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
+          >
+            上轮
+          </button>
+          <button
+            v-if="isDealer && dealerHasBottomRef && bottomCardsCount > 0"
+            @click="openBottomCards"
+            class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
+          >
+            查看底牌
+          </button>
         </div>
       </div>
     </div>
@@ -204,9 +195,13 @@
             >
               准备
             </button>
-            <div v-else class="text-amber-300 text-lg font-semibold">
-              已准备
-            </div>
+            <button
+              v-else
+              @click="sendCancelReadyToStart"
+              class="px-6 py-3 rounded bg-red-600 hover:bg-red-700 text-white text-lg font-semibold shadow-lg"
+            >
+              取消准备
+            </button>
             <!-- 准备进度 -->
             <div class="mt-2 text-sm text-slate-400">
               准备进度：{{ game.ready_to_start.ready_count }} / {{ game.ready_to_start.total_players }}
@@ -1330,6 +1325,19 @@ function sendReadyToStart() {
   }
 }
 
+// 取消准备开始游戏（waiting阶段）
+function sendCancelReadyToStart() {
+  if (ws.connected && playerId.value) {
+    // 乐观更新：立即更新本地状态，不等待后端响应
+    const index = game.ready_to_start.ready_players.indexOf(playerId.value)
+    if (index > -1) {
+      game.ready_to_start.ready_players.splice(index, 1)
+      game.ready_to_start.ready_count = game.ready_to_start.ready_players.length
+    }
+    ws.send({ type: 'cancel_ready_to_start_game' })
+  }
+}
+
 // 检查是否已准备下一轮
 const isReadyForNextRound = computed(() => {
   if (!playerId.value || !game.ready_for_next_round.ready_players) return false
@@ -1493,18 +1501,8 @@ onMounted(() => {
       playError.value = null
       // 清空当前轮次最大玩家
       currentTrickMaxPlayer.value = null
-      // 注意：applyTrickComplete已经在ws.ts中更新了current_trick
-      // 延迟2秒后清空current_trick（让玩家观察）
-      const trickCompleteTimeout = setTimeout(() => {
-        // 检查是否已经开始下一轮（如果current_trick已经被更新，说明下一轮已经开始）
-        if (game.current_trick && game.current_trick.length > 0) {
-          game.current_trick = []
-        }
-      }, 2000)
-      // 保存timeout ID以便在下一轮开始时清除
-      if (typeof window !== 'undefined') {
-        (window as any).__trickCompleteTimeout = trickCompleteTimeout
-      }
+      // 注意：applyTrickComplete已经在ws.ts中更新了current_trick为上一轮完成的牌
+      // 不清空current_trick，保留上一轮的牌，等待新一轮第一名玩家出牌时再清空
     } else if (msg.type === 'card_played') {
       // 如果一轮完成（trick_complete为true），不清空current_trick，等待trick_complete事件处理
       if (!msg.trick_complete) {
@@ -1516,15 +1514,9 @@ onMounted(() => {
             slingshotFailedCards.value = msg.cards || []
           }
         } else {
-          // 如果是新的一轮开始（领出），立即清空上一轮的牌
+          // 如果是新的一轮开始（领出），重置当前轮次最大玩家
+          // 注意：applyCardPlayed已经在ws.ts中自动调用，会在更新之前清空上一轮的牌
           if (msg.current_trick && msg.current_trick.length === 1) {
-            // 清除之前的延迟清空定时器
-            if (typeof window !== 'undefined' && (window as any).__trickCompleteTimeout) {
-              clearTimeout((window as any).__trickCompleteTimeout)
-              delete (window as any).__trickCompleteTimeout
-            }
-            // 新的一轮开始，立即清空上一轮的牌
-            game.current_trick = []
             // 重置当前轮次最大玩家
             currentTrickMaxPlayer.value = null
           } else if (msg.current_trick && msg.current_trick.length === 0) {
