@@ -48,6 +48,7 @@ class GameState:
         self.idle_score = 0  # 闲家得分（庄家不计分）
         self.tricks_won = {"north_south": 0, "east_west": 0}
         self.bottom_cards: List[Card] = []  # 底牌，始终8张
+        self.original_bottom_cards: List[Card] = []  # 原始底牌（用于高亮显示，不会被替换）
         self.dealer_has_bottom = False  # 庄家是否已获得底牌
         # 发牌流程（逐张、逆时针）：NORTH -> WEST -> SOUTH -> EAST -> ...
         self.dealing_order: List[PlayerPosition] = [
@@ -91,6 +92,7 @@ class GameState:
         self.trump_locked = False
         self.dealer_has_bottom = False
         self.bottom_pending = False
+        self.original_bottom_cards = []  # 清空原始底牌
         self.bidding_turn_player_id = None
         self._bidding_queue = []
         
@@ -158,6 +160,9 @@ class GameState:
         if not dealer:
             return False
         
+        # 保存原始底牌（用于高亮显示）
+        self.original_bottom_cards = self.bottom_cards.copy()
+        
         # 庄家获得底牌（33张牌），保持手牌有序
         sorter = CardSorter(
             current_level=self.card_system.current_level,
@@ -214,6 +219,9 @@ class GameState:
         )
         dealer.cards = sorter.sort_cards(dealer.cards)
         self.bottom_pending = False
+        
+        # 清空原始底牌（扣底完成后不再需要高亮）
+        self.original_bottom_cards = []
         self.game_phase = "playing"
         # 设置当前出牌玩家为庄家（第一轮由庄家领出）
         self.current_player = self.dealer_position

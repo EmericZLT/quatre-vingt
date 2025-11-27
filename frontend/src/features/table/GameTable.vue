@@ -253,6 +253,7 @@
             :selectedIndices="selectedCardIndices"
             :isReady="isPlayerReady(viewMap.bottom)"
             :showReadyStatus="showReadyStatus"
+            :highlightedCards="newlyAddedBottomCards"
             @card-click="handleCardClick"
           />
 
@@ -1182,6 +1183,8 @@ function submitBottom() {
   if (!canSubmitBottom.value) return
   submittingBottom.value = true
   ws.send({ type: 'submit_bottom', cards: [...selectedBottomCards.value] })
+  // 扣底提交后，清除新加入底牌的高亮标记
+  newlyAddedBottomCards.value = []
 }
 
 const playerNameMap = computed<Record<string, string>>(() => {
@@ -1226,6 +1229,9 @@ const viewMap = computed<{ top: Pos; left: Pos; bottom: Pos; right: Pos }>(() =>
 
 // 玩家手牌（存储卡牌字符串）- 只存储自己的手牌
 const myHand = ref<string[]>([])
+
+// 新加入的底牌列表（用于高亮显示，仅在庄家获得底牌后且未扣底时有效）
+const newlyAddedBottomCards = ref<string[]>([])
 
 // 所有玩家的手牌数量（用于显示卡背和计数）
 const playersCardsCount = ref<Record<Pos, number>>({
@@ -1444,6 +1450,13 @@ onMounted(() => {
         if (myPosition.value) {
           playersCardsCount.value[myPosition.value] = myHand.value.length
         }
+      }
+      // 更新新加入的底牌列表（仅在庄家获得底牌后且未扣底时有效）
+      if (msg.newly_added_bottom_cards && Array.isArray(msg.newly_added_bottom_cards)) {
+        newlyAddedBottomCards.value = [...msg.newly_added_bottom_cards]
+      } else if (msg.phase !== 'bottom' || !msg.bottom_pending) {
+        // 只有在不是bottom阶段或扣底完成时才清空
+        newlyAddedBottomCards.value = []
       }
       // 更新当前轮次最大玩家（从snapshot中获取）
       if (msg.current_trick_max_player_id && phase.value === 'playing' && !bottomPendingRef.value) {

@@ -298,6 +298,12 @@ class ConnectionManager:
         if player_id and dealer and player_id == dealer.id and gs.bottom_cards:
             snapshot["bottom_cards"] = [str(card) for card in gs.bottom_cards]
         
+        # 添加新加入的底牌信息（仅在庄家获得底牌后且尚未扣底时）
+        if player_id and dealer and player_id == dealer.id and gs.dealer_has_bottom and gs.bottom_pending:
+            # 使用原始底牌（不会被扣底替换）
+            if hasattr(gs, 'original_bottom_cards') and gs.original_bottom_cards:
+                snapshot["newly_added_bottom_cards"] = [str(card) for card in gs.original_bottom_cards]
+        
         # 添加当前轮次和上一轮出牌信息
         if hasattr(gs, "current_trick_with_player"):
             snapshot["current_trick"] = gs.current_trick_with_player
@@ -361,8 +367,13 @@ class ConnectionManager:
                             pos.position.value: len(pos.cards) for pos in gs.room.players
                         }
                         personal_snapshot["my_hand"] = personal_hand
-                        if dealer and conn.player_id == dealer.id and gs.bottom_cards:
-                            personal_snapshot["bottom_cards"] = [str(card) for card in gs.bottom_cards]
+                        if dealer and conn.player_id == dealer.id:
+                            if gs.bottom_cards:
+                                personal_snapshot["bottom_cards"] = [str(card) for card in gs.bottom_cards]
+                            # 添加新加入的底牌信息（仅在庄家获得底牌后且尚未扣底时）
+                            if gs.dealer_has_bottom and gs.bottom_pending:
+                                if hasattr(gs, 'original_bottom_cards') and gs.original_bottom_cards:
+                                    personal_snapshot["newly_added_bottom_cards"] = [str(card) for card in gs.original_bottom_cards]
                         else:
                             personal_snapshot.pop("bottom_cards", None)
                         try:

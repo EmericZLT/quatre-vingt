@@ -74,7 +74,8 @@
           :class="{
             selectable: props.selectable && card !== '__BACK__',
             selected: isSelected(index),
-            hovered: hoveredIndex === index && props.selectable && card !== '__BACK__'
+            hovered: hoveredIndex === index && props.selectable && card !== '__BACK__',
+            highlighted: isHighlighted(index)
           }"
           :style="getCardStyle(index)"
           @click="handleCardClick(index, card)"
@@ -111,6 +112,7 @@ interface Props {
   selectedIndices?: number[]
   isReady?: boolean
   showReadyStatus?: boolean
+  highlightedCards?: string[]  // 需要高亮显示的牌（例如新加入的底牌）
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -121,7 +123,8 @@ const props = withDefaults(defineProps<Props>(), {
   selectable: false,
   selectedIndices: () => [],
   isReady: false,
-  showReadyStatus: false
+  showReadyStatus: false,
+  highlightedCards: () => []
 })
 
 const emit = defineEmits<{
@@ -440,6 +443,14 @@ function isSelected(index: number): boolean {
   return Array.isArray(props.selectedIndices) && props.selectedIndices.includes(index)
 }
 
+function isHighlighted(index: number): boolean {
+  if (!props.highlightedCards || props.highlightedCards.length === 0) return false
+  const card = props.cards[index]
+  if (!card || card === '__BACK__') return false
+  // 检查这张牌是否在高亮列表中
+  return props.highlightedCards.includes(card)
+}
+
 function handleCardClick(index: number, cardStr: string) {
   if (!props.selectable || cardStr === '__BACK__') return
   emit('card-click', index)
@@ -643,6 +654,13 @@ function handleCardClick(index: number, cardStr: string) {
   outline-offset: 2px;
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
   /* 不改变 z-index，保持原有堆叠顺序（左边的牌在下方，右边的牌在上方） */
+}
+
+.card-stack-item.highlighted {
+  /* 醒目的橙色边框和背景，表示新加入的底牌 */
+  border: 4px solid #f97316 !important;
+  background: rgba(249, 115, 22, 0.2) !important;
+  box-shadow: 0 0 0 3px #ffffff, 0 4px 16px rgba(249, 115, 22, 0.6) !important;
 }
 
 .card-image {
