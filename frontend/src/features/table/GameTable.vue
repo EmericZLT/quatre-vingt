@@ -35,6 +35,17 @@
           >
             查看底牌
           </button>
+          <button
+            @click="handleLeaveRoom"
+            :disabled="!canLeaveRoom"
+            :title="canLeaveRoom ? '退出房间' : '只能在准备阶段且未准备时退出'"
+            class="px-4 py-2 rounded text-sm font-semibold transition-colors"
+            :class="canLeaveRoom 
+              ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer' 
+              : 'bg-slate-700 text-slate-400 cursor-not-allowed'"
+          >
+            退出房间
+          </button>
         </div>
       </div>
     </div>
@@ -47,7 +58,8 @@
           <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
           <div>主牌花色：<span class="font-semibold">{{ displayTrumpSuit }}</span></div>
           <div>庄家：<span class="font-semibold">{{ dealerLabel }}</span></div>
-          <div v-if="!trumpSuit">当前最高：<span class="font-semibold">{{ displayCurrentBid }}</span></div>
+          <div v-if="currentBid">定主方：<span class="font-semibold">{{ bidWinnerDisplay }}</span></div>
+          <div v-if="(phase === 'dealing' || phase === 'bidding') && currentBid">当前最高：<span class="font-semibold">{{ displayCurrentBid }}</span></div>
           <div v-if="phase === 'bottom'" class="text-amber-200/80">扣底阶段：{{ bottomStatusText }}</div>
           <div v-if="phase === 'playing' && currentTrickMaxPlayer">本轮最大：<span class="font-semibold">{{ currentTrickMaxPlayer }}</span></div>
         </div>
@@ -1210,10 +1222,43 @@ const displayCurrentBid = computed(() => {
   return `${name} - ${suit} ${typeLabel[bid.bid_type]}`
 })
 
+// 定主方显示（包含定主牌描述）
+const bidWinnerDisplay = computed(() => {
+  const bid = currentBidInfo.value
+  if (!bid) return '暂无'
+  const playerKey = bid.player_id ?? ''
+  const name = playerKey ? (playerNameMap.value[playerKey] || '未知玩家') : '未知玩家'
+  
+  // 根据bid_type生成定主牌描述
+  let bidDescription = ''
+  const levelLabel = levelRankLabel.value
+  
+  switch (bid.bid_type) {
+    case 'single_level':
+      bidDescription = `单${levelLabel}`
+      break
+    case 'pair_level':
+      bidDescription = `对${levelLabel}`
+      break
+    case 'double_joker':
+      bidDescription = '对小王'
+      break
+    case 'double_big_joker':
+      bidDescription = '对大王'
+      break
+  }
+  
+  return `${name} (${bidDescription})`
+})
+
 // 座位名称（玩家名或空座位）
 function getSeatName(pos: Pos): string {
   const p = (players.value || []).find(x => (x.position as string)?.toUpperCase() === pos)
-  return p?.name || '(空座位)'
+  const posLabel = getPosLabel(pos)
+  if (p?.name) {
+    return `${p.name} (${posLabel})`
+  }
+  return '(空座位)'
 }
 
 // 视角映射：保证当前玩家位于底部（SOUTH），其余座位相对旋转
@@ -1355,6 +1400,26 @@ const isReadyToStart = computed(() => {
   if (!playerId.value || !game.ready_to_start.ready_players) return false
   return game.ready_to_start.ready_players.includes(playerId.value)
 })
+
+// 检查是否可以退出房间（只能在准备阶段且未准备时退出）
+const canLeaveRoom = computed(() => {
+  return phase.value === 'waiting' && !isReadyToStart.value
+})
+
+// 退出房间
+function handleLeaveRoom() {
+  if (!canLeaveRoom.value) return
+  
+  // 确认退出
+  if (confirm('确定要退出房间吗？')) {
+    // 清除房间信息
+    roomStore.clearRoom()
+    // 断开WebSocket连接
+    ws.disconnect()
+    // 跳转到房间列表
+    router.push('/rooms')
+  }
+}
 
 // 获取级别标签
 function getLevelLabel(level: number): string {

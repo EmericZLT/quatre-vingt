@@ -447,8 +447,28 @@ function isHighlighted(index: number): boolean {
   if (!props.highlightedCards || props.highlightedCards.length === 0) return false
   const card = props.cards[index]
   if (!card || card === '__BACK__') return false
-  // 检查这张牌是否在高亮列表中
-  return props.highlightedCards.includes(card)
+  
+  // 统计高亮列表中每张牌的数量
+  const highlightedCardCounts = new Map<string, number>()
+  for (const c of props.highlightedCards) {
+    highlightedCardCounts.set(c, (highlightedCardCounts.get(c) || 0) + 1)
+  }
+  
+  // 统计当前索引之前已经高亮的相同牌的数量
+  let countBeforeIndex = 0
+  for (let i = 0; i < index; i++) {
+    if (props.cards[i] === card) {
+      // 检查这张牌是否应该被高亮（基于数量限制）
+      const requiredCount = highlightedCardCounts.get(card) || 0
+      if (countBeforeIndex < requiredCount) {
+        countBeforeIndex++
+      }
+    }
+  }
+  
+  // 检查当前牌是否应该被高亮（还有剩余配额）
+  const requiredCount = highlightedCardCounts.get(card) || 0
+  return countBeforeIndex < requiredCount
 }
 
 function handleCardClick(index: number, cardStr: string) {
@@ -658,9 +678,9 @@ function handleCardClick(index: number, cardStr: string) {
 
 .card-stack-item.highlighted {
   /* 醒目的橙色边框和背景，表示新加入的底牌 */
-  border: 4px solid #f97316 !important;
+  border: 2px solid #f97316 !important;
   background: rgba(249, 115, 22, 0.2) !important;
-  box-shadow: 0 0 0 3px #ffffff, 0 4px 16px rgba(249, 115, 22, 0.6) !important;
+  /* box-shadow: 0 0 0 1px #ffffff, 0 4px 16px rgba(249, 115, 22, 0.6) !important; */
 }
 
 .card-image {
