@@ -15,7 +15,7 @@ jobs:
         run: |
           # 替换为你的实际 Render URL
           # 如果使用环境变量，可以在 GitHub Secrets 中设置 RENDER_URL
-          RENDER_URL=${RENDER_URL:-https://quatre-vingt.onrender.com}
+          RENDER_URL=${RENDER_URL:-https://quatre-vingt-backend.onrender.com}
           curl -f "${RENDER_URL}/health" || exit 1
         env:
           # 如果设置了 GitHub Secret，取消下面的注释
