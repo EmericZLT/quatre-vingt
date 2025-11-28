@@ -73,6 +73,9 @@ class GameState:
         self.players_ready_to_start: set = set()  # 已准备好开始游戏的玩家ID集合（waiting阶段使用）
         self.round_summary: Optional[Dict[str, Any]] = None  # 本局游戏总结信息
         self.bottom_bonus_info: Optional[Dict[str, Any]] = None  # 扣底信息：{"bottom_score": int, "multiplier": int, "bonus": int}
+        # 打A次数统计（用于惩罚连续打A但未胜利的一方）
+        self.north_south_ace_count: int = 0  # 南北方坐庄且级牌为A的次数
+        self.east_west_ace_count: int = 0    # 东西方坐庄且级牌为A的次数
         
     def start_game(self) -> bool:
         """开始游戏（当所有玩家都准备时自动调用）"""
@@ -897,11 +900,18 @@ class GameState:
             idle_level = self.north_south_level
         
         # 分数抹零（向下取整到10的倍数，仅用于计算升级）
-        rounded_score = (final_idle_score // 10) * 10
+        # 需求1：特殊处理75分，不抹零为70分，而是直接视为75分（庄家不升级）
+        if final_idle_score == 75:
+            rounded_score = 75
+        else:
+            rounded_score = (final_idle_score // 10) * 10
         
         # 保存升级前的级别（用于round_summary）
         old_north_south_level = self.north_south_level
         old_east_west_level = self.east_west_level
+        
+        # 需求2：检查庄家是否在打A（级牌为14，即A）
+        dealer_is_playing_ace = (dealer_level == 14)
         
         # 计算升级
         if rounded_score >= 80:
@@ -911,9 +921,46 @@ class GameState:
             dealer_level_up = 0
         else:
             # 庄家升级
-            dealer_level_up = (80 - rounded_score) // 10
+            # 需求1：75分时庄家不升级
+            if rounded_score == 75:
+                dealer_level_up = 0
+            else:
+                dealer_level_up = (80 - rounded_score) // 10
             dealer_level = min(14, dealer_level + dealer_level_up)
             idle_level_up = 0
+        
+        # 需求2：检查庄家是否胜利（打A且升级）
+        dealer_wins = dealer_is_playing_ace and dealer_level_up > 0
+        
+        # 需求3：更新打A次数统计
+        if dealer_is_playing_ace:
+            # 庄家在打A，增加计数
+            if dealer_side == "north_south":
+                self.north_south_ace_count += 1
+            else:
+                self.east_west_ace_count += 1
+        
+        # 需求3：检查是否需要惩罚（打A三次仍未胜利）
+        dealer_penalty = False
+        if dealer_is_playing_ace and not dealer_wins:
+            # 打A但未胜利，检查是否达到3次
+            ace_count = self.north_south_ace_count if dealer_side == "north_south" else self.east_west_ace_count
+            if ace_count >= 3:
+                # 达到3次，重置级别为2
+                dealer_level = 2
+                dealer_penalty = True
+                # 清零计数
+                if dealer_side == "north_south":
+                    self.north_south_ace_count = 0
+                else:
+                    self.east_west_ace_count = 0
+        
+        # 需求2：如果庄家胜利，清零打A计数（因为已经胜利）
+        if dealer_wins:
+            if dealer_side == "north_south":
+                self.north_south_ace_count = 0
+            else:
+                self.east_west_ace_count = 0
         
         # 更新级别（根据位置）
         if dealer_side == "north_south":
@@ -934,6 +981,16 @@ class GameState:
         next_dealer_player = self.get_player_by_position(next_dealer)
         next_dealer_name = next_dealer_player.name if next_dealer_player else next_dealer.value
         
+        # 确定胜利方信息（如果有胜利）
+        winner_side = None
+        winner_side_name = None
+        if dealer_wins:
+            winner_side = dealer_side
+            if dealer_side == "north_south":
+                winner_side_name = "南北方"
+            else:
+                winner_side_name = "东西方"
+        
         # 保存本局总结信息（包括底牌，用于查看）
         self.round_summary = {
             "idle_score": base_idle_score,  # 基础得分（不含扣底）
@@ -951,7 +1008,13 @@ class GameState:
             "next_dealer": next_dealer.value,
             "next_dealer_name": next_dealer_name,
             "bottom_cards": [str(card) for card in self.bottom_cards],  # 保存底牌字符串列表
-            "tricks_won": self.tricks_won.copy()
+            "tricks_won": self.tricks_won.copy(),
+            "dealer_wins": dealer_wins,  # 需求2：庄家是否胜利
+            "winner_side": winner_side,  # 胜利方："north_south" 或 "east_west"，无胜利时为None
+            "winner_side_name": winner_side_name,  # 胜利方名称："南北方" 或 "东西方"，无胜利时为None
+            "dealer_penalty": dealer_penalty,  # 需求3：庄家是否被惩罚
+            "north_south_ace_count": self.north_south_ace_count,  # 需求3：南北方打A次数
+            "east_west_ace_count": self.east_west_ace_count  # 需求3：东西方打A次数
         }
         
         # 进入scoring阶段
@@ -1079,6 +1142,27 @@ class GameState:
         
         if len(self.players_ready_for_next_round) != len(self.room.players):
             return False
+        
+        # 需求2：检查庄家是否胜利，如果胜利则重置游戏
+        dealer_wins = self.round_summary.get("dealer_wins", False) if self.round_summary else False
+        
+        if dealer_wins:
+            # 庄家胜利，重置游戏到初始状态
+            # 重置级别为2
+            self.north_south_level = 2
+            self.east_west_level = 2
+            # 重置打A次数
+            self.north_south_ace_count = 0
+            self.east_west_ace_count = 0
+            # 重置为初始状态（从级牌2重新开始，进入第一局游戏状态）
+            self.is_first_round = True
+            # 清空定主方（重新开始时需要重新确定定主方）
+            self.fixed_dealer_position = None
+            # 清空round_summary
+            self.round_summary = None
+            # 调用end_round来重置状态
+            self.end_round(self.idle_score)
+            return True
         
         # 应用下一轮设置
         if self.round_summary:

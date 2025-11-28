@@ -41,6 +41,12 @@ export const useGameStore = defineStore('game', {
       next_dealer_name: string
       bottom_cards?: string[]  // 本局底牌（用于查看）
       tricks_won: { north_south: number; east_west: number }
+      dealer_wins?: boolean  // 庄家是否胜利（打A且升级）
+      winner_side?: string | null  // 胜利方："north_south" 或 "east_west"，无胜利时为null
+      winner_side_name?: string | null  // 胜利方名称："南北方" 或 "东西方"，无胜利时为null
+      dealer_penalty?: boolean  // 庄家是否被惩罚（打A三次未胜利）
+      north_south_ace_count?: number  // 南北方打A次数
+      east_west_ace_count?: number  // 东西方打A次数
     },
     // 准备下一轮的玩家状态
     ready_for_next_round: {

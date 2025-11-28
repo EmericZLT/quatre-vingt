@@ -100,6 +100,11 @@
         >
           <div class="text-center mb-6">
             <h2 class="text-2xl font-bold text-amber-300 mb-2">本局游戏总结</h2>
+            <!-- 胜利信息 -->
+            <div v-if="game.round_summary?.dealer_wins" class="mt-4 bg-gradient-to-r from-yellow-600 to-amber-600 rounded-lg p-4 border-2 border-yellow-400">
+              <div class="text-3xl font-bold text-white mb-2">🎉 {{ game.round_summary?.winner_side_name }} 胜利！🎉</div>
+              <div class="text-lg text-yellow-100">游戏将从级牌2重新开始</div>
+            </div>
           </div>
           
           <div class="space-y-4 mb-6">
