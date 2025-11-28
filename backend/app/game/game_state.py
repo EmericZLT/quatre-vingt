@@ -225,6 +225,9 @@ class GameState:
         self.game_phase = "playing"
         # 设置当前出牌玩家为庄家（第一轮由庄家领出）
         self.current_player = self.dealer_position
+        # 重置expected_leader为None，确保第一轮由庄家领出
+        if self.card_playing_system:
+            self.card_playing_system.expected_leader = None
         return True
     
     def get_dealer(self) -> Optional[Player]:
@@ -360,6 +363,9 @@ class GameState:
                 self.trump_locked = True
                 # 设置当前出牌玩家为庄家（第一轮由庄家领出）
                 self.current_player = self.dealer_position
+                # 重置expected_leader为None，确保第一轮由庄家领出
+                if self.card_playing_system:
+                    self.card_playing_system.expected_leader = None
                 return True
         
         # 如果底牌全是王牌，设为无主
