@@ -2363,8 +2363,8 @@ watch(myHand, () => {
 /* 移动端牌桌内部容器 - 扩大尺寸，增加玩家间距 */
 .mobile-table-inner {
   /* 扩大牌桌尺寸，确保有足够空间显示所有内容，避免手牌被遮挡 */
-  width: 125%;
-  height: 125%;
+  width: 120%;
+  height: 120%;
   min-width: 1200px;
   min-height: 900px;
   /* 确保牌桌初始居中，但可以通过拖动查看 */
