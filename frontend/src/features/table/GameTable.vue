@@ -987,9 +987,11 @@ function handleTouchMove(e: TouchEvent) {
   const deltaX = e.touches[0].clientX - dragStartX.value
   const deltaY = e.touches[0].clientY - dragStartY.value
   
-  // 更新拖动位置
-  mobileTranslateX.value = dragStartTranslateX.value + deltaX
-  mobileTranslateY.value = dragStartTranslateY.value + deltaY
+  // 由于牌桌旋转了90度，需要调整拖动方向
+  // 旋转90度后：屏幕的X方向对应牌桌的Y方向，屏幕的Y方向对应牌桌的X方向（反向）
+  // 所以：deltaX -> translateY, deltaY -> translateX（反向）
+  mobileTranslateX.value = dragStartTranslateX.value - deltaY  // 屏幕Y方向对应牌桌X方向（反向）
+  mobileTranslateY.value = dragStartTranslateY.value + deltaX  // 屏幕X方向对应牌桌Y方向
   
   e.preventDefault()
 }
@@ -2261,10 +2263,10 @@ watch(myHand, () => {
 /* 移动端牌桌内部容器 - 扩大尺寸，增加玩家间距 */
 .mobile-table-inner {
   /* 扩大牌桌尺寸，确保有足够空间显示所有内容，避免手牌被遮挡 */
-  width: 150%;
-  height: 150%;
-  min-width: 1400px;
-  min-height: 1000px;
+  width: 125%;
+  height: 125%;
+  min-width: 1200px;
+  min-height: 900px;
   /* 确保牌桌初始居中，但可以通过拖动查看 */
   position: relative;
   margin: 0 auto;
