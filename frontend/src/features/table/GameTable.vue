@@ -961,35 +961,69 @@ const dragStartTranslateX = ref<number>(0)
 const dragStartTranslateY = ref<number>(0)
 
 // 触摸拖动处理（避免与卡牌点击冲突）
+const touchStartTime = ref<number>(0)
+const touchStartDistance = ref<number>(0)
+const touchStartTarget = ref<HTMLElement | null>(null)
+
 function handleTouchStart(e: TouchEvent) {
   if (!isMobile.value) return
   if (e.touches.length !== 1) return  // 只处理单指拖动
   
-  // 检查是否点击在可交互元素上（按钮、卡牌等）
   const target = e.target as HTMLElement
+  touchStartTarget.value = target
+  
+  // 检查是否点击在可交互元素上（按钮、卡牌等）
   if (target.closest('button') || target.closest('.card-stack-item') || target.closest('.player-area')) {
-    return  // 不处理，让点击事件正常触发
+    // 如果是可交互元素，不处理拖动，让点击事件正常触发
+    isDragging.value = false
+    return
   }
   
-  isDragging.value = true
+  // 记录触摸开始时间和位置
+  touchStartTime.value = Date.now()
   dragStartX.value = e.touches[0].clientX
   dragStartY.value = e.touches[0].clientY
   dragStartTranslateX.value = mobileTranslateX.value
   dragStartTranslateY.value = mobileTranslateY.value
+  touchStartDistance.value = 0
   
-  e.preventDefault()
+  // 不立即设置 isDragging，等待移动距离判断
+  isDragging.value = false
 }
 
 function handleTouchMove(e: TouchEvent) {
-  if (!isMobile.value || !isDragging.value) return
+  if (!isMobile.value) return
   if (e.touches.length !== 1) return
+  
+  // 如果触摸目标在可交互元素上，不处理拖动
+  if (touchStartTarget.value) {
+    if (touchStartTarget.value.closest('button') || 
+        touchStartTarget.value.closest('.card-stack-item') || 
+        touchStartTarget.value.closest('.player-area')) {
+      return
+    }
+  }
   
   const deltaX = e.touches[0].clientX - dragStartX.value
   const deltaY = e.touches[0].clientY - dragStartY.value
+  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+  touchStartDistance.value = distance
+  
+  // 如果移动距离小于10px，认为是点击，不触发拖动
+  if (distance < 10 && !isDragging.value) {
+    return
+  }
+  
+  // 如果移动距离足够，开始拖动
+  if (!isDragging.value && distance >= 10) {
+    isDragging.value = true
+  }
+  
+  if (!isDragging.value) return
   
   // 由于牌桌旋转了90度，需要调整拖动方向
-  // 旋转90度后：屏幕的X方向对应牌桌的Y方向，屏幕的Y方向对应牌桌的X方向（反向）
-  // 所以：deltaX -> translateY, deltaY -> translateX（反向）
+  // 旋转90度后：屏幕的X方向对应牌桌的Y方向，屏幕的Y方向对应牌桌的X方向
+  // 反转方向：deltaX -> translateY（反向），deltaY -> translateX（反向）
   mobileTranslateX.value = dragStartTranslateX.value - deltaY  // 屏幕Y方向对应牌桌X方向（反向）
   mobileTranslateY.value = dragStartTranslateY.value + deltaX  // 屏幕X方向对应牌桌Y方向
   
@@ -998,8 +1032,29 @@ function handleTouchMove(e: TouchEvent) {
 
 function handleTouchEnd(e: TouchEvent) {
   if (!isMobile.value) return
+  
+  // 如果触摸目标在可交互元素上，不阻止默认行为
+  if (touchStartTarget.value) {
+    if (touchStartTarget.value.closest('button') || 
+        touchStartTarget.value.closest('.card-stack-item') || 
+        touchStartTarget.value.closest('.player-area')) {
+      touchStartTarget.value = null
+      isDragging.value = false
+      return
+    }
+  }
+  
+  // 如果拖动距离很小且时间很短，可能是点击，不阻止默认行为
+  const touchDuration = Date.now() - touchStartTime.value
+  const wasClick = !isDragging.value || (touchStartDistance.value < 10 && touchDuration < 300)
+  
   isDragging.value = false
-  e.preventDefault()
+  touchStartTarget.value = null
+  
+  // 如果是点击，不阻止默认行为，让点击事件正常触发
+  if (!wasClick) {
+    e.preventDefault()
+  }
 }
 
 // 移动端旋转容器的样式（只包含旋转和拖动，不包含缩放）
