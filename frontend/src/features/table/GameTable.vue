@@ -2366,7 +2366,7 @@ watch(myHand, () => {
   width: 115%;
   height: 115%;
   min-width: 1000px;
-  min-height: 800px;
+  min-height: 650px;
   /* 确保牌桌初始居中，但可以通过拖动查看 */
   position: relative;
   margin: 0 auto;
