@@ -2,7 +2,7 @@
   <div class="min-h-screen bg-slate-900 text-slate-100">
     <div class="max-w-6xl mx-auto p-4">
       <header class="flex items-center justify-between py-2">
-        <h1 class="text-xl font-semibold">潘子爹团建 | Quatre-Vingt</h1>
+        <h1 class="text-xl font-semibold">八十分（升级） | Quatre-Vingt</h1>
         <nav class="space-x-4 text-slate-300">
           <RouterLink
             v-if="hasActiveRoom"

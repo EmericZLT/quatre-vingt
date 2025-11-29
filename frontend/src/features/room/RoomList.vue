@@ -1,7 +1,7 @@
 <template>
   <div class="room-list-container min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-8">
     <div class="max-w-4xl mx-auto">
-      <h1 class="text-3xl font-bold text-white mb-8 text-center">八十分游戏大厅</h1>
+      <h1 class="text-3xl font-bold text-white mb-8 text-center">游戏大厅</h1>
       
       <!-- 创建房间区域 -->
       <div class="bg-slate-800 rounded-lg p-6 mb-6">
