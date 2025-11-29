@@ -1064,7 +1064,7 @@ function handleTouchMove(e: TouchEvent) {
   // 正确的映射：屏幕向右拖动（deltaX+）-> 牌桌向下移动（translateY+）
   //           屏幕向下拖动（deltaY+）-> 牌桌向右移动（translateX+）
   mobileTranslateX.value = dragStartTranslateX.value + deltaY  // 屏幕Y方向对应牌桌X方向
-  mobileTranslateY.value = dragStartTranslateY.value + deltaX  // 屏幕X方向对应牌桌Y方向
+  mobileTranslateY.value = dragStartTranslateY.value - deltaX  // 屏幕X方向对应牌桌Y方向
   
   e.preventDefault()
 }
