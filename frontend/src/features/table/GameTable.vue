@@ -1,7 +1,15 @@
 <template>
   <div class="game-table-container min-h-screen bg-gradient-to-br from-green-900 to-green-800" :class="{ 'mobile-rotated': isMobile }">
     <!-- 移动端旋转包装器 -->
-    <div v-if="isMobile" class="mobile-rotation-wrapper">
+    <div 
+      v-if="isMobile" 
+      class="mobile-rotation-wrapper"
+      :style="mobileRotationStyle"
+      @touchstart="handleTouchStart"
+      @touchmove="handleTouchMove"
+      @touchend="handleTouchEnd"
+      @touchcancel="handleTouchEnd"
+    >
       <!-- 顶部控制栏（移动端简化版） -->
       <div class="mobile-control-bar">
         <div class="flex items-center justify-between gap-2 text-xs">
@@ -941,7 +949,112 @@ const game = useGameStore()
 const roomStore = useRoomStore()
 
 // 设备检测
-const { isMobile } = useDeviceDetection()
+const { isMobile, screenWidth } = useDeviceDetection()
+
+// 移动端缩放和拖动相关
+const mobileScale = ref<number>(1)
+const mobileTranslateX = ref<number>(0)
+const mobileTranslateY = ref<number>(0)
+const isDragging = ref<boolean>(false)
+const dragStartX = ref<number>(0)
+const dragStartY = ref<number>(0)
+const dragStartTranslateX = ref<number>(0)
+const dragStartTranslateY = ref<number>(0)
+
+// 计算移动端缩放比例（确保牌桌适应屏幕）
+function calculateMobileScale() {
+  if (!isMobile.value || typeof window === 'undefined') return 1
+  
+  // 旋转后的尺寸：宽高互换
+  // 原始牌桌尺寸（桌面端的设计尺寸，参考max-w-7xl约1280px）
+  const originalWidth = 1280  // 桌面端牌桌的参考宽度
+  const originalHeight = 900  // 桌面端牌桌的参考高度（包含padding和手牌区域）
+  
+  // 旋转后的可用空间（旋转90度后，宽高互换）
+  const availableWidth = window.innerHeight  // 旋转后，屏幕高度变成宽度
+  const availableHeight = window.innerWidth - 60  // 旋转后，屏幕宽度变成高度，减去控制栏高度（约40px）+ 边距（20px）
+  
+  // 计算缩放比例（取较小值，确保完全适应）
+  const scaleX = (availableWidth * 0.92) / originalWidth  // 留8%边距
+  const scaleY = (availableHeight * 0.92) / originalHeight  // 留8%边距
+  
+  // 取较小值，确保牌桌完全可见，但不小于0.3（防止过小）
+  return Math.max(Math.min(scaleX, scaleY), 0.3)
+}
+
+// 更新移动端缩放
+function updateMobileScale() {
+  if (isMobile.value) {
+    mobileScale.value = calculateMobileScale()
+    // 重置拖动位置
+    mobileTranslateX.value = 0
+    mobileTranslateY.value = 0
+  }
+}
+
+// 触摸拖动处理（避免与卡牌点击冲突）
+function handleTouchStart(e: TouchEvent) {
+  if (!isMobile.value) return
+  if (e.touches.length !== 1) return  // 只处理单指拖动
+  
+  // 检查是否点击在可交互元素上（按钮、卡牌等）
+  const target = e.target as HTMLElement
+  if (target.closest('button') || target.closest('.card-stack-item') || target.closest('.player-area')) {
+    return  // 不处理，让点击事件正常触发
+  }
+  
+  isDragging.value = true
+  dragStartX.value = e.touches[0].clientX
+  dragStartY.value = e.touches[0].clientY
+  dragStartTranslateX.value = mobileTranslateX.value
+  dragStartTranslateY.value = mobileTranslateY.value
+  
+  e.preventDefault()
+}
+
+function handleTouchMove(e: TouchEvent) {
+  if (!isMobile.value || !isDragging.value) return
+  if (e.touches.length !== 1) return
+  
+  const deltaX = e.touches[0].clientX - dragStartX.value
+  const deltaY = e.touches[0].clientY - dragStartY.value
+  
+  // 更新拖动位置（考虑缩放）
+  mobileTranslateX.value = dragStartTranslateX.value + deltaX / mobileScale.value
+  mobileTranslateY.value = dragStartTranslateY.value + deltaY / mobileScale.value
+  
+  e.preventDefault()
+}
+
+function handleTouchEnd(e: TouchEvent) {
+  if (!isMobile.value) return
+  isDragging.value = false
+  e.preventDefault()
+}
+
+// 监听屏幕尺寸变化，更新缩放
+watch([isMobile, screenWidth], () => {
+  if (isMobile.value) {
+    nextTick(() => {
+      updateMobileScale()
+    })
+  } else {
+    // 非移动端时重置
+    mobileScale.value = 1
+    mobileTranslateX.value = 0
+    mobileTranslateY.value = 0
+  }
+}, { immediate: true })
+
+// 移动端旋转容器的样式
+const mobileRotationStyle = computed(() => {
+  if (!isMobile.value) return {}
+  
+  return {
+    transform: `translate(-50%, -50%) rotate(90deg) scale(${mobileScale.value}) translate(${mobileTranslateX.value / mobileScale.value}px, ${mobileTranslateY.value / mobileScale.value}px)`,
+    transformOrigin: 'center center'
+  }
+})
 
 const { connected, log } = storeToRefs(ws)
 const {
@@ -1862,6 +1975,11 @@ let messageHandler: ((msg: any) => void) | null = null
 
 // 监听WebSocket消息
 onMounted(() => {
+  // 初始化移动端缩放
+  if (isMobile.value) {
+    updateMobileScale()
+  }
+  
   // 检查是否有房间和玩家信息
   if (!roomId.value || !playerId.value) {
     alert('请先加入房间')
@@ -2154,14 +2272,17 @@ watch(myHand, () => {
   position: fixed;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center center;
   /* 防止滚动 */
-  overflow: hidden;
+  overflow: visible; /* 改为visible，允许拖动查看 */
   /* 确保在最上层 */
   z-index: 1;
   /* 背景色 */
   background: linear-gradient(to bottom right, rgb(20, 83, 45), rgb(22, 101, 52));
+  /* 触摸拖动 */
+  touch-action: pan-x pan-y; /* 允许拖动 */
+  user-select: none; /* 防止文本选择 */
+  -webkit-user-select: none;
 }
 
 /* 移动端控制栏 */
@@ -2182,7 +2303,7 @@ watch(myHand, () => {
   width: 100%;
   height: 100%;
   padding-top: 2.5rem; /* 为控制栏留出空间 */
-  overflow: hidden;
+  overflow: visible; /* 允许拖动查看 */
 }
 
 .mobile-table-container > div {
