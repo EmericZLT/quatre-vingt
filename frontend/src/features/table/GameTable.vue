@@ -1,58 +1,44 @@
 <template>
-  <div class="game-table-container min-h-screen bg-gradient-to-br from-green-900 to-green-800 p-4">
-    <!-- 顶部控制栏 -->
-    <div class="max-w-7xl mx-auto mb-4">
-      <div class="bg-slate-900/80 rounded-lg p-4 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-4">
-          <h2 class="text-xl font-bold text-white">牌局界面</h2>
-          <div class="text-sm text-slate-300" v-if="roomName">
-            房间：<span class="font-semibold text-white">{{ roomName }}</span>
+  <div class="game-table-container min-h-screen bg-gradient-to-br from-green-900 to-green-800" :class="{ 'mobile-rotated': isMobile }">
+    <!-- 移动端旋转包装器 -->
+    <div v-if="isMobile" class="mobile-rotation-wrapper">
+      <!-- 顶部控制栏（移动端简化版） -->
+      <div class="mobile-control-bar">
+        <div class="flex items-center justify-between gap-2 text-xs">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-white">{{ phaseLabel }}</span>
+            <span v-if="roomName" class="text-slate-300">{{ roomName }}</span>
           </div>
-          <div class="text-sm text-slate-300">
-            已发牌：<span class="font-semibold text-white">{{ dealtCount }}</span> / 100
+          <div class="flex gap-1">
+            <button
+              v-if="phase === 'playing' && lastTrickCards.length > 0"
+              @click="openLastTrick"
+              class="px-2 py-1 rounded bg-amber-600 text-white text-xs"
+            >
+              上轮
+            </button>
+            <button
+              v-if="isDealer && dealerHasBottomRef && bottomCardsCount > 0"
+              @click="openBottomCards"
+              class="px-2 py-1 rounded bg-purple-600 text-white text-xs"
+            >
+              底牌
+            </button>
+            <button
+              @click="handleLeaveRoom"
+              :disabled="!canLeaveRoom"
+              class="px-2 py-1 rounded text-xs"
+              :class="canLeaveRoom ? 'bg-red-600 text-white' : 'bg-slate-700 text-slate-400'"
+            >
+              退出
+            </button>
           </div>
-          <div class="text-sm text-slate-300">
-            阶段：<span class="font-semibold text-white">{{ phaseLabel }}</span>
-          </div>
-          <div v-if="roomStore.playerName" class="text-sm text-slate-300">
-            玩家：<span class="font-semibold text-white">{{ roomStore.playerName }}</span>
-            <span class="text-xs ml-2">({{ myPosition }})</span>
-          </div>
-        </div>
-        <div class="flex gap-2">
-          <!-- 断开连接按钮已隐藏，不允许用户主动断开连接 -->
-          <button
-            v-if="phase === 'playing' && lastTrickCards.length > 0"
-            @click="openLastTrick"
-            class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
-          >
-            上轮
-          </button>
-          <button
-            v-if="isDealer && dealerHasBottomRef && bottomCardsCount > 0"
-            @click="openBottomCards"
-            class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
-          >
-            查看底牌
-          </button>
-          <button
-            @click="handleLeaveRoom"
-            :disabled="!canLeaveRoom"
-            :title="canLeaveRoom ? '退出房间' : '只能在准备阶段且未准备时退出'"
-            class="px-4 py-2 rounded text-sm font-semibold transition-colors"
-            :class="canLeaveRoom 
-              ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer' 
-              : 'bg-slate-700 text-slate-400 cursor-not-allowed'"
-          >
-            退出房间
-          </button>
         </div>
       </div>
-    </div>
 
-    <!-- 牌桌主体 -->
-    <div class="max-w-7xl mx-auto">
-      <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 min-h-[700px]">
+      <!-- 牌桌主体（移动端） -->
+      <div class="mobile-table-container">
+        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 min-h-[700px]">
         <!-- 左上角：级牌、主牌、庄家信息 -->
         <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
           <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
@@ -408,8 +394,420 @@
             :showReadyStatus="showReadyStatus"
           />
         </div>
+        </div>
       </div>
     </div>
+    <!-- 桌面端布局 -->
+    <template v-else>
+      <!-- 顶部控制栏 -->
+      <div class="max-w-7xl mx-auto mb-4 p-4">
+        <div class="bg-slate-900/80 rounded-lg p-4 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <h2 class="text-xl font-bold text-white">牌局界面</h2>
+            <div class="text-sm text-slate-300" v-if="roomName">
+              房间：<span class="font-semibold text-white">{{ roomName }}</span>
+            </div>
+            <div class="text-sm text-slate-300">
+              已发牌：<span class="font-semibold text-white">{{ dealtCount }}</span> / 100
+            </div>
+            <div class="text-sm text-slate-300">
+              阶段：<span class="font-semibold text-white">{{ phaseLabel }}</span>
+            </div>
+            <div v-if="roomStore.playerName" class="text-sm text-slate-300">
+              玩家：<span class="font-semibold text-white">{{ roomStore.playerName }}</span>
+              <span class="text-xs ml-2">({{ myPosition }})</span>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-if="phase === 'playing' && lastTrickCards.length > 0"
+              @click="openLastTrick"
+              class="px-4 py-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-sm"
+            >
+              上轮
+            </button>
+            <button
+              v-if="isDealer && dealerHasBottomRef && bottomCardsCount > 0"
+              @click="openBottomCards"
+              class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
+            >
+              查看底牌
+            </button>
+            <button
+              @click="handleLeaveRoom"
+              :disabled="!canLeaveRoom"
+              :title="canLeaveRoom ? '退出房间' : '只能在准备阶段且未准备时退出'"
+              class="px-4 py-2 rounded text-sm font-semibold transition-colors"
+              :class="canLeaveRoom 
+                ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer' 
+                : 'bg-slate-700 text-slate-400 cursor-not-allowed'"
+            >
+              退出房间
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 牌桌主体 -->
+      <div class="max-w-7xl mx-auto p-4">
+        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 min-h-[700px]">
+          <!-- 左上角：级牌、主牌、庄家信息 -->
+          <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
+            <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
+            <div>主牌花色：<span class="font-semibold">{{ displayTrumpSuit }}</span></div>
+            <div>庄家：<span class="font-semibold">{{ dealerLabel }}</span></div>
+            <div v-if="currentBid">定主方：<span class="font-semibold">{{ bidWinnerDisplay }}</span></div>
+            <div v-if="(phase === 'dealing' || phase === 'bidding') && currentBid">当前最高：<span class="font-semibold">{{ displayCurrentBid }}</span></div>
+            <div v-if="phase === 'bottom'" class="text-amber-200/80">扣底阶段：{{ bottomStatusText }}</div>
+            <div v-if="phase === 'playing' && currentTrickMaxPlayer">本轮最大：<span class="font-semibold">{{ currentTrickMaxPlayer }}</span></div>
+          </div>
+          <!-- 右上角：闲家总得分 -->
+          <div class="absolute top-4 right-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
+            <div class="text-amber-200 font-semibold mb-1">闲家得分</div>
+            <div class="text-lg font-bold text-amber-300">{{ idleScoreTotal }}</div>
+          </div>
+          
+          <!-- 中央提示框（用于显示甩牌失败等全局提示） -->
+          <div
+            v-if="centerNotification.show"
+            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-red-900/90 text-white px-6 py-4 rounded-lg shadow-2xl border-2 border-red-500"
+          >
+            <div class="text-xl font-bold text-center">
+              {{ centerNotification.message }}
+            </div>
+          </div>
+
+          <!-- 查看总结按钮（当总结隐藏时，显示在屏幕中央） -->
+          <div
+            v-if="phase === 'scoring' && game.round_summary && !showRoundSummary"
+            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50"
+          >
+            <button
+              @click="showRoundSummary = true"
+              class="px-6 py-3 rounded bg-amber-600 hover:bg-amber-700 text-white text-lg font-semibold shadow-lg"
+            >
+              查看总结
+            </button>
+          </div>
+
+          <!-- 本局游戏总结弹窗（scoring阶段） -->
+          <div
+            v-if="phase === 'scoring' && game.round_summary && showRoundSummary"
+            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-amber-500 p-8 min-w-[500px]"
+          >
+            <div class="text-center mb-6">
+              <h2 class="text-2xl font-bold text-amber-300 mb-2">本局游戏总结</h2>
+              <!-- 胜利信息 -->
+              <div v-if="game.round_summary?.dealer_wins" class="mt-4 bg-gradient-to-r from-yellow-600 to-amber-600 rounded-lg p-4 border-2 border-yellow-400">
+                <div class="text-3xl font-bold text-white mb-2">🎉 {{ game.round_summary?.winner_side_name }} 胜利！🎉</div>
+                <div class="text-lg text-yellow-100">游戏将从级牌2重新开始</div>
+              </div>
+            </div>
+            
+            <div class="space-y-4 mb-6">
+              <!-- 闲家得分 -->
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300">闲家得分：</span>
+                <span class="text-lg font-semibold">{{ game.round_summary.idle_score }}分</span>
+              </div>
+              
+              <!-- 扣底信息 -->
+              <div v-if="game.round_summary.bottom_bonus > 0" class="flex justify-between items-center">
+                <span class="text-slate-300">扣底得分：</span>
+                <span class="text-lg font-semibold text-amber-300">
+                  +{{ game.round_summary.bottom_bonus }}分
+                  <span class="text-sm text-slate-400 ml-2">
+                    (底牌{{ game.round_summary.bottom_score }}分 × {{ game.round_summary.bottom_score > 0 ? (game.round_summary.bottom_bonus / game.round_summary.bottom_score).toFixed(0) : 1 }}倍)
+                  </span>
+                </span>
+              </div>
+              
+              <!-- 总得分 -->
+              <div class="flex justify-between items-center border-t border-slate-700 pt-2">
+                <span class="text-lg font-semibold">闲家总得分：</span>
+                <span class="text-2xl font-bold text-amber-300">{{ game.round_summary.total_score }}分</span>
+              </div>
+              
+              <!-- 升级信息 -->
+              <div class="flex flex-col gap-2 border-t border-slate-700 pt-2">
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-300">南北家级别：</span>
+                  <span class="text-lg font-semibold">
+                    {{ getLevelLabel(game.round_summary.old_north_south_level) }} → {{ getLevelLabel(game.round_summary.new_north_south_level) }}
+                    <span v-if="game.round_summary.dealer_side === 'north_south' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
+                    <span v-if="game.round_summary.idle_side === 'north_south' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
+                  </span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-300">东西家级别：</span>
+                  <span class="text-lg font-semibold">
+                    {{ getLevelLabel(game.round_summary.old_east_west_level) }} → {{ getLevelLabel(game.round_summary.new_east_west_level) }}
+                    <span v-if="game.round_summary.dealer_side === 'east_west' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
+                    <span v-if="game.round_summary.idle_side === 'east_west' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
+                  </span>
+                </div>
+              </div>
+              
+              <!-- 下一轮庄家 -->
+              <div class="flex justify-between items-center border-t border-slate-700 pt-2">
+                <span class="text-slate-300">下一轮庄家：</span>
+                <span class="text-lg font-semibold">{{ game.round_summary.next_dealer_name || getPositionLabel(game.round_summary.next_dealer) }}</span>
+              </div>
+            </div>
+            
+            <!-- 底部按钮 -->
+            <div class="flex gap-2 justify-center border-t border-slate-700 pt-4">
+              <button
+                @click="openRoundSummaryBottomCards"
+                class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold"
+              >
+                查看底牌
+              </button>
+              <button
+                @click="showRoundSummary = false"
+                class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold"
+              >
+                隐藏总结
+              </button>
+            </div>
+          </div>
+
+          <!-- 准备按钮（在屏幕底部中央） -->
+          <!-- scoring阶段的准备按钮 -->
+          <div
+            v-if="phase === 'scoring' && game.round_summary"
+            class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50"
+          >
+            <div class="text-center">
+              <button
+                v-if="!isReadyForNextRound"
+                @click="sendReadyForNextRound"
+                class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
+              >
+                准备
+              </button>
+              <div v-else class="text-amber-300 text-lg font-semibold">
+                已准备
+              </div>
+              <!-- 准备进度 -->
+              <div class="mt-2 text-sm text-slate-400">
+                准备进度：{{ game.ready_for_next_round.ready_count }} / {{ game.ready_for_next_round.total_players }}
+              </div>
+            </div>
+          </div>
+          
+          <!-- waiting阶段的准备按钮 -->
+          <div
+            v-if="phase === 'waiting'"
+            class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50"
+          >
+            <div class="text-center">
+              <button
+                v-if="!isReadyToStart"
+                @click="sendReadyToStart"
+                class="px-6 py-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-semibold shadow-lg"
+              >
+                准备
+              </button>
+              <button
+                v-else
+                @click="sendCancelReadyToStart"
+                class="px-6 py-3 rounded bg-red-600 hover:bg-red-700 text-white text-lg font-semibold shadow-lg"
+              >
+                取消准备
+              </button>
+              <!-- 准备进度 -->
+              <div class="mt-2 text-sm text-slate-400">
+                准备进度：{{ game.ready_to_start.ready_count }} / {{ game.ready_to_start.total_players }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 顶部（上方） -->
+          <div class="absolute top-8 left-1/2 transform -translate-x-1/2 z-20">
+            <PlayerArea 
+              position="NORTH"
+              :cards="getPlayerHand(viewMap.top)"
+              :cardsCount="getPlayerCardsCount(viewMap.top)"
+              :isCurrentPlayer="false"
+              :displayName="getSeatName(viewMap.top)"
+              :biddingCards="getBiddingCards(viewMap.top)"
+              :playedCards="getPlayedCards(viewMap.top)"
+              :isReady="isPlayerReady(viewMap.top)"
+              :showReadyStatus="showReadyStatus"
+            />
+          </div>
+
+          <!-- 左侧 -->
+          <div class="absolute left-8 top-1/2 transform -translate-y-1/2 z-20">
+            <PlayerArea 
+              position="WEST"
+              :cards="getPlayerHand(viewMap.left)"
+              :cardsCount="getPlayerCardsCount(viewMap.left)"
+              :isCurrentPlayer="false"
+              :displayName="getSeatName(viewMap.left)"
+              :biddingCards="getBiddingCards(viewMap.left)"
+              :playedCards="getPlayedCards(viewMap.left)"
+              :isReady="isPlayerReady(viewMap.left)"
+              :showReadyStatus="showReadyStatus"
+            />
+          </div>
+
+          <!-- 底部（下方，当前玩家视角） -->
+          <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+            <PlayerArea
+              position="SOUTH"
+              :cards="getPlayerHand(viewMap.bottom)"
+              :cardsCount="getPlayerCardsCount(viewMap.bottom)"
+              :isCurrentPlayer="true"
+              :displayName="getSeatName(viewMap.bottom)"
+              :biddingCards="getBiddingCards(viewMap.bottom)"
+              :playedCards="getPlayedCards(viewMap.bottom)"
+              :selectable="isSelectingBottom || isSelectingCard"
+              :selectedIndices="selectedCardIndices"
+              :isReady="isPlayerReady(viewMap.bottom)"
+              :showReadyStatus="showReadyStatus"
+              :highlightedCards="newlyAddedBottomCards"
+              @card-click="handleCardClick"
+            />
+
+            <!-- 亮主/反主面板 -->
+            <div v-if="showBiddingPanel" class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-sm">亮主 / 反主：选择要亮主的花色</div>
+                <div class="text-xs text-slate-300">
+                  当前亮主：
+                  <span class="font-semibold">
+                    {{ displayCurrentBid }}
+                  </span>
+                </div>
+              </div>
+              <div class="flex gap-2 flex-wrap">
+                <button
+                  class="px-3 py-1 rounded text-sm transition-colors"
+                  :class="bidOptions.noTrump ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 text-slate-400 opacity-50 cursor-not-allowed'"
+                  :disabled="disableBidding || !bidOptions.noTrump"
+                  @click="handleBid('NO_TRUMP')"
+                >
+                  无主
+                </button>
+                <button
+                  v-for="suit in suitButtons"
+                  :key="`bid-${suit}`"
+                  class="px-3 py-1 rounded text-sm transition-colors"
+                  :class="bidOptions.suits[suit] ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 text-slate-400 opacity-50 cursor-not-allowed'"
+                  :disabled="disableBidding || !bidOptions.suits[suit]"
+                  @click="handleBid(suit)"
+                >
+                  {{ suit }}
+                </button>
+                <button
+                  v-if="turnPlayerId === playerId"
+                  class="px-3 py-1 rounded bg-slate-600 hover:bg-slate-500 text-sm"
+                  @click="passBid"
+                >
+                  过
+                </button>
+              </div>
+            </div>
+            <!-- 扣底面板（仅庄家） -->
+            <div
+              v-else-if="isDealer && phase === 'bottom'"
+              class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
+            >
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-sm">扣底：请选择 {{ requiredBottomCount }} 张牌放回底牌</div>
+                <div class="text-xs text-slate-300">
+                  已选 <span class="font-semibold">{{ selectedBottomIndices.length }}</span> / {{ requiredBottomCount }}
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button
+                  class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm"
+                  @click="resetBottomSelection"
+                  :disabled="selectedBottomIndices.length === 0"
+                >
+                  重置选择
+                </button>
+                <button
+                  class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-sm text-white disabled:bg-slate-600 disabled:text-slate-300"
+                  :disabled="!canSubmitBottom || submittingBottom"
+                  @click="submitBottom"
+                >
+                  {{ submittingBottom ? '提交中...' : '确认扣底' }}
+                </button>
+              </div>
+            </div>
+            <!-- 出牌面板（仅playing阶段且轮到当前玩家） -->
+            <div
+              v-if="phase === 'playing' && isMyTurn"
+              class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
+            >
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-sm">出牌：请选择要出的牌（单张、对子、连对或甩牌）</div>
+                <div v-if="selectedCards.length > 0" class="text-xs text-amber-200">
+                  已选 <span class="font-semibold">{{ selectedCards.length }}</span> 张
+                </div>
+              </div>
+              <!-- 错误信息显示 -->
+              <div v-if="playError" class="mb-2 text-sm text-red-400 bg-red-900/30 px-2 py-1 rounded">
+                {{ playError }}
+              </div>
+              <!-- 已选牌显示 -->
+              <div v-if="selectedCards.length > 0" class="mb-2 flex gap-1 flex-wrap">
+                <div
+                  v-for="(card, idx) in selectedCards"
+                  :key="`selected-${idx}`"
+                  class="w-10 h-14 rounded border-2 border-emerald-400 overflow-hidden"
+                >
+                  <img :src="getCardImage(card)" :alt="card" class="w-full h-full object-cover" />
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button
+                  class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm"
+                  @click="selectedCardIndicesForPlay = []"
+                  :disabled="selectedCards.length === 0"
+                >
+                  取消选择
+                </button>
+                <button
+                  class="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-sm text-white disabled:bg-slate-600 disabled:text-slate-300"
+                  :disabled="!canPlayCard"
+                  @click="playCard"
+                >
+                  {{ playingCard ? '出牌中...' : '出牌' }}
+                </button>
+              </div>
+            </div>
+            <!-- 等待其他玩家出牌提示 -->
+            <div
+              v-else-if="phase === 'playing' && !isMyTurn"
+              class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto text-center"
+            >
+              <div class="text-sm text-amber-200">
+                等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧 -->
+          <div class="absolute right-8 top-1/2 transform -translate-y-1/2 z-20">
+            <PlayerArea 
+              position="EAST"
+              :cards="getPlayerHand(viewMap.right)"
+              :cardsCount="getPlayerCardsCount(viewMap.right)"
+              :isCurrentPlayer="false"
+              :displayName="getSeatName(viewMap.right)"
+              :biddingCards="getBiddingCards(viewMap.right)"
+              :playedCards="getPlayedCards(viewMap.right)"
+              :isReady="isPlayerReady(viewMap.right)"
+              :showReadyStatus="showReadyStatus"
+            />
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 
   <!-- "查看底牌"弹窗 -->
@@ -532,6 +930,7 @@ import { useRoomStore } from '@/stores/room'
 import PlayerArea from './PlayerArea.vue'
 import { getCardImageFromString, parseCardString } from '@/utils/cards'
 import { getWebSocketUrl } from '@/config/env'
+import { useDeviceDetection } from '@/composables/useDeviceDetection'
 
 type Pos = 'NORTH' | 'WEST' | 'SOUTH' | 'EAST'
 
@@ -540,6 +939,9 @@ const router = useRouter()
 const ws = useWsStore()
 const game = useGameStore()
 const roomStore = useRoomStore()
+
+// 设备检测
+const { isMobile } = useDeviceDetection()
 
 const { connected, log } = storeToRefs(ws)
 const {
@@ -1731,6 +2133,75 @@ watch(myHand, () => {
   background-image: 
     radial-gradient(circle at 20% 50%, rgba(139, 69, 19, 0.3) 0%, transparent 50%),
     radial-gradient(circle at 80% 80%, rgba(34, 139, 34, 0.3) 0%, transparent 50%);
+}
+
+/* 移动端旋转模式 */
+.game-table-container.mobile-rotated {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* 移动端旋转包装器 */
+.mobile-rotation-wrapper {
+  /* 旋转整个容器90度 */
+  width: 100vh;
+  height: 100vw;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center center;
+  /* 防止滚动 */
+  overflow: hidden;
+  /* 确保在最上层 */
+  z-index: 1;
+  /* 背景色 */
+  background: linear-gradient(to bottom right, rgb(20, 83, 45), rgb(22, 101, 52));
+}
+
+/* 移动端控制栏 */
+.mobile-control-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.5rem;
+  z-index: 40;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 移动端牌桌容器 */
+.mobile-table-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding-top: 2.5rem; /* 为控制栏留出空间 */
+  overflow: hidden;
+}
+
+.mobile-table-container > div {
+  width: 100%;
+  height: 100%;
+  min-height: auto;
+}
+</style>
+
+<style>
+/* 全局样式：移动端时禁止body滚动 */
+@media (max-width: 767px) {
+  body.mobile-rotated,
+  html.mobile-rotated {
+    overflow: hidden !important;
+    position: fixed !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
 }
 </style>
 
