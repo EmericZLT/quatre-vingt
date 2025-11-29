@@ -46,7 +46,7 @@
 
       <!-- 牌桌主体（移动端） -->
       <div class="mobile-table-container">
-        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 min-h-[700px]">
+        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 mobile-table-inner">
         <!-- 左上角：级牌、主牌、庄家信息 -->
         <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
           <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
@@ -949,10 +949,9 @@ const game = useGameStore()
 const roomStore = useRoomStore()
 
 // 设备检测
-const { isMobile, screenWidth } = useDeviceDetection()
+const { isMobile } = useDeviceDetection()
 
-// 移动端缩放和拖动相关
-const mobileScale = ref<number>(1)
+// 移动端拖动相关
 const mobileTranslateX = ref<number>(0)
 const mobileTranslateY = ref<number>(0)
 const isDragging = ref<boolean>(false)
@@ -960,37 +959,6 @@ const dragStartX = ref<number>(0)
 const dragStartY = ref<number>(0)
 const dragStartTranslateX = ref<number>(0)
 const dragStartTranslateY = ref<number>(0)
-
-// 计算移动端缩放比例（确保牌桌适应屏幕）
-function calculateMobileScale() {
-  if (!isMobile.value || typeof window === 'undefined') return 1
-  
-  // 旋转后的尺寸：宽高互换
-  // 原始牌桌尺寸（桌面端的设计尺寸，参考max-w-7xl约1280px）
-  const originalWidth = 1280  // 桌面端牌桌的参考宽度
-  const originalHeight = 900  // 桌面端牌桌的参考高度（包含padding和手牌区域）
-  
-  // 旋转后的可用空间（旋转90度后，宽高互换）
-  const availableWidth = window.innerHeight  // 旋转后，屏幕高度变成宽度
-  const availableHeight = window.innerWidth - 60  // 旋转后，屏幕宽度变成高度，减去控制栏高度（约40px）+ 边距（20px）
-  
-  // 计算缩放比例（取较小值，确保完全适应）
-  const scaleX = (availableWidth * 0.92) / originalWidth  // 留8%边距
-  const scaleY = (availableHeight * 0.92) / originalHeight  // 留8%边距
-  
-  // 取较小值，确保牌桌完全可见，但不小于0.3（防止过小）
-  return Math.max(Math.min(scaleX, scaleY), 0.3)
-}
-
-// 更新移动端缩放
-function updateMobileScale() {
-  if (isMobile.value) {
-    mobileScale.value = calculateMobileScale()
-    // 重置拖动位置
-    mobileTranslateX.value = 0
-    mobileTranslateY.value = 0
-  }
-}
 
 // 触摸拖动处理（避免与卡牌点击冲突）
 function handleTouchStart(e: TouchEvent) {
@@ -1019,9 +987,9 @@ function handleTouchMove(e: TouchEvent) {
   const deltaX = e.touches[0].clientX - dragStartX.value
   const deltaY = e.touches[0].clientY - dragStartY.value
   
-  // 更新拖动位置（考虑缩放）
-  mobileTranslateX.value = dragStartTranslateX.value + deltaX / mobileScale.value
-  mobileTranslateY.value = dragStartTranslateY.value + deltaY / mobileScale.value
+  // 更新拖动位置
+  mobileTranslateX.value = dragStartTranslateX.value + deltaX
+  mobileTranslateY.value = dragStartTranslateY.value + deltaY
   
   e.preventDefault()
 }
@@ -1032,26 +1000,12 @@ function handleTouchEnd(e: TouchEvent) {
   e.preventDefault()
 }
 
-// 监听屏幕尺寸变化，更新缩放
-watch([isMobile, screenWidth], () => {
-  if (isMobile.value) {
-    nextTick(() => {
-      updateMobileScale()
-    })
-  } else {
-    // 非移动端时重置
-    mobileScale.value = 1
-    mobileTranslateX.value = 0
-    mobileTranslateY.value = 0
-  }
-}, { immediate: true })
-
-// 移动端旋转容器的样式
+// 移动端旋转容器的样式（只包含旋转和拖动，不包含缩放）
 const mobileRotationStyle = computed(() => {
   if (!isMobile.value) return {}
   
   return {
-    transform: `translate(-50%, -50%) rotate(90deg) scale(${mobileScale.value}) translate(${mobileTranslateX.value / mobileScale.value}px, ${mobileTranslateY.value / mobileScale.value}px)`,
+    transform: `translate(-50%, -50%) rotate(90deg) translate(${mobileTranslateX.value}px, ${mobileTranslateY.value}px)`,
     transformOrigin: 'center center'
   }
 })
@@ -1975,11 +1929,6 @@ let messageHandler: ((msg: any) => void) | null = null
 
 // 监听WebSocket消息
 onMounted(() => {
-  // 初始化移动端缩放
-  if (isMobile.value) {
-    updateMobileScale()
-  }
-  
   // 检查是否有房间和玩家信息
   if (!roomId.value || !playerId.value) {
     alert('请先加入房间')
@@ -2304,12 +2253,21 @@ watch(myHand, () => {
   height: 100%;
   padding-top: 2.5rem; /* 为控制栏留出空间 */
   overflow: visible; /* 允许拖动查看 */
+  /* 确保容器足够大，可以容纳扩大的牌桌 */
+  min-width: 100%;
+  min-height: 100%;
 }
 
-.mobile-table-container > div {
-  width: 100%;
-  height: 100%;
-  min-height: auto;
+/* 移动端牌桌内部容器 - 扩大尺寸，增加玩家间距 */
+.mobile-table-inner {
+  /* 扩大牌桌尺寸，确保有足够空间显示所有内容，避免手牌被遮挡 */
+  width: 150%;
+  height: 150%;
+  min-width: 1400px;
+  min-height: 1000px;
+  /* 确保牌桌初始居中，但可以通过拖动查看 */
+  position: relative;
+  margin: 0 auto;
 }
 </style>
 
