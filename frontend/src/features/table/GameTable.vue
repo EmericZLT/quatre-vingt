@@ -279,6 +279,10 @@
                 </span>
               </div>
             </div>
+            <!-- 等待提示 -->
+            <div v-if="disableBidding && turnPlayerId && turnPlayerId !== playerId" class="mb-2 text-center text-sm text-amber-300">
+              等待 <span class="font-semibold">{{ playerNameMap[turnPlayerId] || '未知玩家' }}</span> 做出决定（反主或过）
+            </div>
             <div class="flex gap-2 flex-wrap">
               <button
                 class="px-3 py-1 rounded text-sm transition-colors"
@@ -689,6 +693,10 @@
                     {{ displayCurrentBid }}
                   </span>
                 </div>
+              </div>
+              <!-- 等待提示 -->
+              <div v-if="disableBidding && turnPlayerId && turnPlayerId !== playerId" class="mb-2 text-center text-sm text-amber-300">
+                等待 <span class="font-semibold">{{ playerNameMap[turnPlayerId] || '未知玩家' }}</span> 做出决定（反主或过）
               </div>
               <div class="flex gap-2 flex-wrap">
                 <button

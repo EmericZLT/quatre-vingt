@@ -287,8 +287,8 @@ class ConnectionManager:
             },
             "bidding_cards": {
                 p_id: [str(card) for card in cards]
-                for p_id, cards in getattr(gs, "bidding_cards", {}).items()
-            } if hasattr(gs, "bidding_cards") else {}
+                for p_id, cards in getattr(gs, "bidding_display_cards", {}).items()
+            } if hasattr(gs, "bidding_display_cards") else {}
         }
         # 亮主状态（若存在）
         try:
@@ -599,18 +599,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     parsed_cards = parse_card_strings(cards_str)
                     result = gs.make_bid(player_id_current, parsed_cards)
                     
-                    # 构建用于前端显示的 bidding_cards
-                    # bidding_cards 中只包含新打出的牌（用于后续归还）
-                    # 但前端需要显示完整的对子（包括凑对时的 prev_card）
-                    # 所以我们使用 actual_cards（字符串列表）来覆盖当前玩家的 bidding_cards
+                    # 使用 bidding_display_cards 来显示前端定主区域的牌
+                    # bidding_display_cards 已经包含了完整的对子（包括凑对时的 prev_card）
                     display_bidding_cards = {
                         p_id: [str(card) for card in cards]
-                        for p_id, cards in getattr(gs, "bidding_cards", {}).items()
-                    } if hasattr(gs, "bidding_cards") else {}
-                    
-                    # 如果反主成功且有 actual_cards，使用 actual_cards 来显示当前玩家的牌
-                    if result.get("success") and "actual_cards" in result:
-                        display_bidding_cards[player_id_current] = result["actual_cards"]
+                        for p_id, cards in getattr(gs, "bidding_display_cards", {}).items()
+                    } if hasattr(gs, "bidding_display_cards") else {}
                     
                     bid_payload = {
                         "type": "bidding_updated",
@@ -635,8 +629,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                             "bidding": gs.get_bidding_status(),
                             "bidding_cards": {
                                 p_id: [str(card) for card in cards]
-                                for p_id, cards in getattr(gs, "bidding_cards", {}).items()
-                            } if hasattr(gs, "bidding_cards") else {},
+                                for p_id, cards in getattr(gs, "bidding_display_cards", {}).items()
+                            } if hasattr(gs, "bidding_display_cards") else {},
                             "turn_player_id": gs.bidding_turn_player_id
                         }
                         await manager.broadcast_to_room(json.dumps(payload), room_id)

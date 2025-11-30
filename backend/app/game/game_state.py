@@ -61,7 +61,8 @@ class GameState:
         self.dealing_deck: List[Card] = []  # 前100张作为发牌区
         self.trump_locked: bool = False  # 定主完成后锁定主牌
         self.dealt_count: int = 0  # 已发出的牌（应至多100）
-        self.bidding_cards: Dict[str, List[Card]] = {}  # 记录每个玩家亮主时打出的牌 {player_id: [cards]}
+        self.bidding_cards: Dict[str, List[Card]] = {}  # 记录每个玩家亮主时打出的牌，用于最后归还 {player_id: [cards]}
+        self.bidding_display_cards: Dict[str, List[Card]] = {}  # 记录每个玩家当前定主区域显示的牌 {player_id: [cards]}
         self.is_first_round: bool = True  # 是否为第一局游戏
         self.fixed_dealer_position: Optional[PlayerPosition] = None  # 第一局确定后固定的庄家
         self.bottom_pending: bool = False  # 是否等待庄家扣底
@@ -113,6 +114,7 @@ class GameState:
         
         # 清空亮主记录
         self.bidding_cards = {}
+        self.bidding_display_cards = {}
         
         # 重置分数
         self.idle_score = 0
@@ -258,15 +260,23 @@ class GameState:
         result = self.bidding_system.make_bid(player_id, cards, previous_bidding_cards)
         
         if result["success"]:
-            # 获取实际用于反主的牌（Card对象列表）
-            # 注意：bidding_system.make_bid 返回的 actual_cards 是字符串列表，我们需要从 bid 对象中获取 Card 对象
-            actual_cards_obj = self.bidding_system.current_bid.cards if self.bidding_system.current_bid else []
+            # 1. 累积记录该玩家打出的牌（用于后续归还和前端显示）
+            # 注意：只记录新打出的牌（cards），不重复记录之前已打出的牌
+            if player_id not in self.bidding_cards:
+                self.bidding_cards[player_id] = []
             
-            # 更新 bidding_cards[player_id] 为 actual_cards_obj，确保前端显示正确的牌
-            # 这样前端可以显示所有实际用于反主的牌（包括凑对后的两张牌）
-            self.bidding_cards[player_id] = [card.copy() if hasattr(card, "copy") else card for card in actual_cards_obj]
+            for card in cards:
+                self.bidding_cards[player_id].append(card.copy() if hasattr(card, "copy") else card)
             
-            # 从玩家手中移除亮主的牌（只移除新打出的牌，不移除之前已打出的牌）
+            # 2. 更新该玩家定主区域显示的牌（用于前端显示）
+            # 前端需要显示该玩家所有打出的牌，所以使用 bidding_cards
+            if player_id not in self.bidding_display_cards:
+                self.bidding_display_cards[player_id] = []
+            
+            for card in cards:
+                self.bidding_display_cards[player_id].append(card.copy() if hasattr(card, "copy") else card)
+            
+            # 3. 从玩家手中移除亮主的牌（只移除新打出的牌，不移除之前已打出的牌）
             for card in cards:
                 player.cards.remove(card)
 
@@ -330,6 +340,7 @@ class GameState:
             
             # 清空亮主记录
             self.bidding_cards = {}
+            self.bidding_display_cards = {}
             self._bidding_queue = []
             self.bidding_turn_player_id = None
             
@@ -711,6 +722,7 @@ class GameState:
         self.last_trick = []
         self.trick_leader = None
         self.bidding_cards = {}
+        self.bidding_display_cards = {}
         self.idle_score = 0  # 重置闲家得分
         self.players_ready_for_next_round = set()  # 清空ready状态
         self.players_ready_to_start = set()  # 清空开始游戏的准备状态
@@ -1225,6 +1237,7 @@ class GameState:
         
         # 清空亮主记录
         self.bidding_cards = {}
+        self.bidding_display_cards = {}
         
         # 重置分数
         self.idle_score = 0
