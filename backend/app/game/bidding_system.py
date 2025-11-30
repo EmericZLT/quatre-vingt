@@ -35,6 +35,13 @@ class Bid:
     
     def can_override(self, other_bid: 'Bid') -> bool:
         """判断是否可以反掉其他出价"""
+        # 特殊规则：方块对子可以反双大王
+        if (self.bid_type == BidType.PAIR_LEVEL and 
+            self.suit == Suit.DIAMONDS and 
+            other_bid.bid_type == BidType.DOUBLE_BIG_JOKER):
+            return True
+        
+        # 正常优先级比较
         if self.priority > other_bid.priority:
             return True
         elif self.priority == other_bid.priority:
