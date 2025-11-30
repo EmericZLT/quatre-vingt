@@ -74,19 +74,31 @@ class BiddingSystem:
         self.current_bid: Optional[Bid] = None
         self.bidding_phase = True
     
-    def make_bid(self, player_id: str, cards: List[Card]) -> Dict[str, Any]:
-        """玩家亮主"""
+    def make_bid(self, player_id: str, cards: List[Card], previous_bidding_cards: Optional[List[Card]] = None) -> Dict[str, Any]:
+        """
+        玩家亮主
+        
+        Args:
+            player_id: 玩家ID
+            cards: 出的牌列表
+            previous_bidding_cards: 该玩家之前打出的牌（用于凑对逻辑）
+        """
         if not self.bidding_phase:
             return {"success": False, "message": "亮主阶段已结束"}
         
-        # 验证牌型
-        bid_type, suit = self._validate_bid_cards(cards)
+        # 验证牌型（支持凑对逻辑）
+        bid_type, suit, actual_cards = self._validate_bid_cards(cards, previous_bidding_cards)
         if not bid_type:
             return {"success": False, "message": "无效的亮主牌型"}
         
-        # 创建出价
+        # 需求1：不允许使用单王或对王进行初次定主，只允许在他人定主后反主
+        if bid_type in [BidType.DOUBLE_JOKER, BidType.DOUBLE_BIG_JOKER]:
+            if self.current_bid is None:
+                return {"success": False, "message": "不能使用王进行初次定主，只能用于反主"}
+        
+        # 创建出价（使用实际用于反主的牌）
         bid = Bid(player_id, bid_type, suit)
-        bid.cards = cards
+        bid.cards = actual_cards  # 使用实际用于反主的牌（可能是凑对后的牌）
         
         # 检查是否可以反主
         if self.current_bid and not bid.can_override(self.current_bid):
@@ -101,13 +113,23 @@ class BiddingSystem:
             "message": "亮主成功",
             "bid_type": bid_type.value,
             "suit": suit.value if suit else None,
-            "priority": bid.priority
+            "priority": bid.priority,
+            "actual_cards": [str(card) for card in actual_cards]  # 返回实际用于反主的牌（转换为字符串列表，用于前端显示）
         }
     
-    def _validate_bid_cards(self, cards: List[Card]) -> tuple[Optional[BidType], Optional[Suit]]:
-        """验证亮主牌型"""
+    def _validate_bid_cards(self, cards: List[Card], previous_bidding_cards: Optional[List[Card]] = None) -> tuple[Optional[BidType], Optional[Suit], List[Card]]:
+        """
+        验证亮主牌型，支持凑对逻辑
+        
+        Args:
+            cards: 玩家出的牌列表
+            previous_bidding_cards: 该玩家之前打出的牌（用于凑对）
+        
+        Returns:
+            (bid_type, suit, actual_cards): 牌型、花色、实际用于反主的牌（可能是凑对后的牌）
+        """
         if not cards:
-            return None, None
+            return None, None, []
         
         # 检查是否为级牌
         level_rank = self._get_level_rank()
@@ -116,22 +138,35 @@ class BiddingSystem:
             # 单张级牌
             card = cards[0]
             if not card.is_joker and card.rank == level_rank:
-                return BidType.SINGLE_LEVEL, card.suit
+                # 检查是否能和之前打出的牌凑对
+                if previous_bidding_cards:
+                    for prev_card in previous_bidding_cards:
+                        # 如果之前也打出过相同花色和级别的牌，可以凑成对子
+                        if (not prev_card.is_joker and 
+                            prev_card.rank == level_rank and 
+                            prev_card.suit == card.suit):
+                            # 凑成对子，返回级牌对子类型
+                            return BidType.PAIR_LEVEL, card.suit, [prev_card, card]
+                
+                # 不能凑对，返回单张级牌
+                return BidType.SINGLE_LEVEL, card.suit, cards
         
         elif len(cards) == 2:
+            # 需求2：如果手上有该花色的一对级牌，默认只使用一张进行定主
             # 检查是否为级牌对子
             if self._is_level_pair(cards, level_rank):
-                return BidType.PAIR_LEVEL, cards[0].suit
+                # 只使用一张进行定主（返回单张级牌类型，但只使用第一张牌）
+                return BidType.SINGLE_LEVEL, cards[0].suit, [cards[0]]
             
             # 检查是否为双小王
             if self._is_double_joker(cards, is_big=False):
-                return BidType.DOUBLE_JOKER, None
+                return BidType.DOUBLE_JOKER, None, cards
             
             # 检查是否为双大王
             if self._is_double_joker(cards, is_big=True):
-                return BidType.DOUBLE_BIG_JOKER, None
+                return BidType.DOUBLE_BIG_JOKER, None, cards
         
-        return None, None
+        return None, None, []
     
     def _get_level_rank(self) -> Rank:
         """获取当前级别的牌面"""

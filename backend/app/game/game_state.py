@@ -251,17 +251,46 @@ class GameState:
             if card not in player.cards:
                 return {"success": False, "message": "玩家没有这些牌"}
         
-        # 调用亮主系统
-        result = self.bidding_system.make_bid(player_id, cards)
+        # 需求2：如果手上有该花色的一对级牌，默认只使用一张进行定主
+        # 检查是否是一对级牌，如果是，只使用一张
+        if len(cards) == 2:
+            card1, card2 = cards
+            # 检查是否为相同花色和级别的级牌对子
+            if (not card1.is_joker and not card2.is_joker and 
+                card1.rank == card2.rank and 
+                self.card_system.is_level_card(card1) and 
+                card1.suit == card2.suit):
+                # 只使用一张进行定主
+                cards = [cards[0]]
+        
+        # 获取该玩家之前打出的牌（用于凑对逻辑）
+        previous_bidding_cards = self.bidding_cards.get(player_id, [])
+        
+        # 调用亮主系统（传递之前打出的牌，支持凑对逻辑）
+        result = self.bidding_system.make_bid(player_id, cards, previous_bidding_cards)
         
         if result["success"]:
+            # 获取实际用于反主的牌（可能是凑对后的牌）
+            actual_cards = result.get("actual_cards", cards)
+            
             # 记录该玩家亮主时打出的牌（备份，用于后续归还）
             if player_id not in self.bidding_cards:
                 self.bidding_cards[player_id] = []
-            # 创建牌的副本，避免引用问题
-            self.bidding_cards[player_id].extend(cards.copy())
             
-            # 从玩家手中移除亮主的牌
+            # 如果使用了凑对逻辑，需要记录实际打出的牌
+            # 但只记录新打出的牌（cards），不重复记录之前已打出的牌
+            # 因为 previous_bidding_cards 已经在 bidding_cards 中了
+            for card in cards:
+                # 检查这张牌是否已经在 previous_bidding_cards 中
+                # 如果不在，说明是新打出的，需要添加到记录中
+                card_already_recorded = any(
+                    prev_card.rank == card.rank and prev_card.suit == card.suit
+                    for prev_card in previous_bidding_cards
+                )
+                if not card_already_recorded:
+                    self.bidding_cards[player_id].append(card.copy() if hasattr(card, "copy") else card)
+            
+            # 从玩家手中移除亮主的牌（只移除新打出的牌）
             for card in cards:
                 player.cards.remove(card)
 

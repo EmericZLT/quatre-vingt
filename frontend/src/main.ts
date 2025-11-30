@@ -5,6 +5,9 @@ import App from './App.vue'
 import routes from './routes'
 import './styles/tailwind.css'
 
+// 设置浏览器标题（确保覆盖缓存）
+document.title = '八十分（升级） | Quatre-Vingt'
+
 const app = createApp(App)
 const pinia = createPinia()
 const router = createRouter({

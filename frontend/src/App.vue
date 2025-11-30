@@ -124,8 +124,8 @@
                 <li><strong class="text-amber-300">必须跟花色</strong>：如果有先出牌的花色，必须跟该花色；如果没有，可以出其他牌</li>
                 <li><strong class="text-amber-300">主牌可以管副牌</strong>：如果没有先出牌的花色，可以用主牌管</li>
                 <li>每轮出牌最大的玩家获得该轮的所有牌，并在下一轮先出牌</li>
-                <li>支持<strong class="text-amber-300">甩牌</strong>：如果手中有多张相同花色的牌，且都比桌面上的牌大，可以一次性打出</li>
-                <li>如果甩牌失败（有其他玩家有更大的牌），需要<strong class="text-amber-300">强制打出</strong>其中一张牌</li>
+                <li>支持<strong class="text-amber-300">甩牌</strong>：如果手中有多张相同花色的牌，且分类后每一类（参考下方的牌型与大小）的最小牌都比他人手中该类的最大牌要大，可以一次性打出</li>
+                <li>如果甩牌失败（有其他玩家有更大的牌），会被<strong class="text-amber-300">强制打出</strong>其中小于他人的最小牌</li>
               </ul>
             </div>
             
