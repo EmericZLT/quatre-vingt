@@ -353,8 +353,8 @@ onMounted(() => {
   roomStore.loadFromStorage()
   canResume.value = !!roomStore.roomId && !!roomStore.token
   loadRooms()
-  // 每3秒智能刷新一次房间列表（只在没有输入框聚焦时）
-  refreshInterval = window.setInterval(smartRefresh, 3000)
+  // 每10秒智能刷新一次房间列表（只在没有输入框聚焦时）
+  refreshInterval = window.setInterval(smartRefresh, 10000)
 })
 
 // 清理定时器
