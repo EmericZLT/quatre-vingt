@@ -108,8 +108,8 @@ class SlingshotLogic:
         if card.rank in [Rank.SMALL_JOKER, Rank.BIG_JOKER]:
             return "trump"
         
-        # 级牌
-        if card.rank.value == str(self.card_system.current_level):
+        # 级牌（使用 CardSystem 的方法判断）
+        if card.rank == self.card_system.get_level_rank():
             return "trump"
         
         # 主牌花色

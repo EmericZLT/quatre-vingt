@@ -152,11 +152,16 @@ class BiddingSystem:
                 return BidType.SINGLE_LEVEL, card.suit, cards
         
         elif len(cards) == 2:
-            # 需求2：如果手上有该花色的一对级牌，默认只使用一张进行定主
             # 检查是否为级牌对子
             if self._is_level_pair(cards, level_rank):
-                # 只使用一张进行定主（返回单张级牌类型，但只使用第一张牌）
-                return BidType.SINGLE_LEVEL, cards[0].suit, [cards[0]]
+                # 需求2：如果手上有该花色的一对级牌，默认只使用一张进行定主
+                # 注意：这个逻辑只在无人定主时（初次定主）生效，反主时应该允许使用对级牌
+                if self.current_bid is None:
+                    # 只使用一张进行定主（返回单张级牌类型，但只使用第一张牌）
+                    return BidType.SINGLE_LEVEL, cards[0].suit, [cards[0]]
+                else:
+                    # 反主时，允许使用对级牌
+                    return BidType.PAIR_LEVEL, cards[0].suit, cards
             
             # 检查是否为双小王
             if self._is_double_joker(cards, is_big=False):

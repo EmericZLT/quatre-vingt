@@ -1665,18 +1665,85 @@ function pickLevelCards(indices: number[], count: number): string[] | null {
 function candidateForSuit(suit: SuitSymbol): CandidateBid | null {
   if (!showBiddingPanel.value) return null
   const indices = handInfo.value.levelIndices[suit]
+  
+  // 检查是否有之前打出的牌可以凑对（用于反主）
+  const myBiddingCards = biddingCardsRaw.value[playerId.value || ''] || []
+  const hasPreviousCardForPair = myBiddingCards.some((card: string) => {
+    const rank = card.slice(0, -1)
+    const cardSuit = card.slice(-1) as SuitSymbol
+    return rank === levelRankLabel.value && cardSuit === suit
+  })
+  
+  // 如果无人定主，且手上有对级牌，应该只使用一张进行定主（根据后端逻辑）
+  if (isOpenBidding.value) {
+    // 无人定主时，只返回单张级牌（即使手上有对子，后端也会强制只使用一张）
+    const singleCard = pickLevelCards(indices, 1)
+    if (singleCard) {
+      return { cards: singleCard, bid_type: 'single_level', suit, priority: priorityMap['single_level'] }
+    }
+    return null
+  }
+  
+  // 已有人定主，进行反主逻辑
   const combos: CandidateBid[] = []
+  
+  // 优先检查：如果手上有单张级牌，且之前已经打出过相同花色的级牌，可以凑对反主
+  if (hasPreviousCardForPair && indices.length >= 1) {
+    const singleCard = pickLevelCards(indices, 1)
+    if (singleCard) {
+      // 凑对逻辑：使用之前打出的牌和手中的一张牌凑成对子
+      // 注意：这里我们只发送手中的一张牌，后端会识别并凑对
+      const combo: CandidateBid = { 
+        cards: singleCard, 
+        bid_type: 'pair_level',  // 凑对后是对子类型
+        suit, 
+        priority: priorityMap['pair_level'] 
+      }
+      if (canOverride(combo)) {
+        combos.push(combo)
+      }
+    }
+  }
+  
+  // 检查：如果手上有对级牌，可以直接用对子反主
+  // 注意：反主时，对级牌应该优先于单张级牌，所以即使当前定主是单张级牌，对级牌也应该可以反主
   const pairCards = pickLevelCards(indices, 2)
   if (pairCards) {
-    combos.push({ cards: pairCards, bid_type: 'pair_level', suit, priority: priorityMap['pair_level'] })
+    const combo: CandidateBid = { 
+      cards: pairCards, 
+      bid_type: 'pair_level', 
+      suit, 
+      priority: priorityMap['pair_level'] 
+    }
+    if (canOverride(combo)) {
+      combos.push(combo)
+    }
   }
-  const singleCard = pickLevelCards(indices, 1)
-  if (singleCard) {
-    combos.push({ cards: singleCard, bid_type: 'single_level', suit, priority: priorityMap['single_level'] })
+  
+  // 检查：如果手上有单张级牌，且不能凑对，可以用单张反主（如果单张可以反主）
+  if (!hasPreviousCardForPair) {
+    const singleCard = pickLevelCards(indices, 1)
+    if (singleCard) {
+      const combo: CandidateBid = { 
+        cards: singleCard, 
+        bid_type: 'single_level', 
+        suit, 
+        priority: priorityMap['single_level'] 
+      }
+      if (canOverride(combo)) {
+        combos.push(combo)
+      }
+    }
   }
-  for (const combo of combos) {
-    if (canOverride(combo)) return combo
+  
+  // 返回优先级最高的组合（优先返回对子）
+  if (combos.length > 0) {
+    // 优先返回对子（pair_level），其次返回单张
+    const pairCombo = combos.find(c => c.bid_type === 'pair_level')
+    if (pairCombo) return pairCombo
+    return combos[0]
   }
+  
   return null
 }
 
@@ -1728,10 +1795,17 @@ const bidOptions = computed(() => {
 
 function handleBid(option: 'NO_TRUMP' | SuitSymbol) {
   if (disableBidding.value) return
+  
+  // 重新计算候选（确保使用最新的状态）
   let candidate: CandidateBid | null = null
-  if (option === 'NO_TRUMP') candidate = bidOptions.value.noTrump
-  else candidate = bidOptions.value.suits[option]
+  if (option === 'NO_TRUMP') {
+    candidate = candidateForNoTrump()
+  } else {
+    candidate = candidateForSuit(option)
+  }
+  
   if (!candidate) return
+  
   ws.send({ type: 'make_bid', cards: candidate.cards })
 }
 

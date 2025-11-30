@@ -598,14 +598,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     cards_str = message.get("cards") or []
                     parsed_cards = parse_card_strings(cards_str)
                     result = gs.make_bid(player_id_current, parsed_cards)
+                    
+                    # 构建用于前端显示的 bidding_cards
+                    # bidding_cards 中只包含新打出的牌（用于后续归还）
+                    # 但前端需要显示完整的对子（包括凑对时的 prev_card）
+                    # 所以我们使用 actual_cards（字符串列表）来覆盖当前玩家的 bidding_cards
+                    display_bidding_cards = {
+                        p_id: [str(card) for card in cards]
+                        for p_id, cards in getattr(gs, "bidding_cards", {}).items()
+                    } if hasattr(gs, "bidding_cards") else {}
+                    
+                    # 如果反主成功且有 actual_cards，使用 actual_cards 来显示当前玩家的牌
+                    if result.get("success") and "actual_cards" in result:
+                        display_bidding_cards[player_id_current] = result["actual_cards"]
+                    
                     bid_payload = {
                         "type": "bidding_updated",
                         "result": result,
                         "bidding": gs.get_bidding_status(),
-                        "bidding_cards": {
-                            p_id: [str(card) for card in cards]
-                            for p_id, cards in getattr(gs, "bidding_cards", {}).items()
-                        } if hasattr(gs, "bidding_cards") else {},
+                        "bidding_cards": display_bidding_cards,
                         "turn_player_id": gs.bidding_turn_player_id
                     }
                     await manager.broadcast_to_room(json.dumps(bid_payload), room_id)
