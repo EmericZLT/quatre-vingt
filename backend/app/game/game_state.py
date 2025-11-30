@@ -727,6 +727,8 @@ class GameState:
         # 重置游戏状态
         self.game_phase = "waiting"
         self.trump_locked = False
+        self.trump_suit = None  # 清空主牌花色
+        self.room.trump_suit = None  # 清空房间的主牌花色
         self.dealer_has_bottom = False
         self.current_trick = []
         self.current_trick_with_player = []
@@ -1226,6 +1228,8 @@ class GameState:
         self.room.status = GameStatus.PLAYING
         self.game_phase = "dealing"
         self.trump_locked = False
+        self.trump_suit = None  # 清空主牌花色（新一局开始时）
+        self.room.trump_suit = None  # 清空房间的主牌花色
         self.dealer_has_bottom = False
         self.bottom_pending = False
         self.bidding_turn_player_id = None

@@ -1682,6 +1682,9 @@ function candidateForSuit(suit: SuitSymbol): CandidateBid | null {
 
 function candidateForNoTrump(): CandidateBid | null {
   if (!showBiddingPanel.value) return null
+  // 需求2：在无人定主时，不允许主动定无主，只能用于反主
+  if (isOpenBidding.value) return null  // 无人定主时，返回null，按钮不会高亮
+  
   const combos: CandidateBid[] = []
   if (handInfo.value.bigJokerIdx.length >= 2) {
     const idx = handInfo.value.bigJokerIdx
