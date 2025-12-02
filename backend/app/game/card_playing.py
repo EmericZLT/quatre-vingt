@@ -1017,7 +1017,7 @@ class CardPlayingSystem:
             return True
         
         # 级牌是主牌
-        if card.rank == self.card_comparison.level_rank:
+        if card.rank == self.card_comparison._get_level_rank():
             return True
         
         # 主牌花色的牌是主牌
