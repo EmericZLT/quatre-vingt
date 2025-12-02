@@ -77,6 +77,47 @@ class GameState:
         # 打A次数统计（用于惩罚连续打A但未胜利的一方）
         self.north_south_ace_count: int = 0  # 南北方坐庄且级牌为A的次数
         self.east_west_ace_count: int = 0    # 东西方坐庄且级牌为A的次数
+    
+    def _reset_round_state(self):
+        """
+        重置一轮游戏的状态（在新一轮开始时调用）
+        包含所有需要清空的游戏状态
+        
+        注意：不清空 players_ready_* 状态，这些由调用方根据需要清空
+        """
+        # 游戏阶段和锁定状态
+        self.room.status = GameStatus.PLAYING
+        self.game_phase = "dealing"
+        self.trump_locked = False
+        
+        # 主牌相关
+        self.trump_suit = None
+        self.room.trump_suit = None
+        self.card_playing_system = None  # 确保使用新的trump_suit重新初始化
+        
+        # 底牌相关
+        self.dealer_has_bottom = False
+        self.bottom_pending = False
+        self.original_bottom_cards = []
+        self.bottom_bonus_info = None
+        
+        # 亮主相关
+        self.bidding_turn_player_id = None
+        self._bidding_queue = []
+        self.bidding_cards = {}
+        self.bidding_display_cards = {}
+        
+        # 出牌相关
+        self.current_trick = []
+        self.current_trick_with_player = []
+        self.last_trick = []
+        self.trick_leader = None
+        
+        # 分数
+        self.idle_score = 0
+        
+        # 总结信息（新一轮开始时清空）
+        self.round_summary = None
         
     def start_game(self) -> bool:
         """开始游戏（当所有玩家都准备时自动调用）"""
@@ -91,17 +132,13 @@ class GameState:
         
         if self.fixed_dealer_position is not None:
             self.dealer_position = self.fixed_dealer_position
-        self.room.status = GameStatus.PLAYING
-        self.game_phase = "dealing"
-        self.trump_locked = False
-        self.trump_suit = None  # 清空主牌花色（新一局开始时）
-        self.room.trump_suit = None  # 清空房间的主牌花色
-        self.card_playing_system = None  # 清空出牌系统（确保使用新的trump_suit重新初始化）
-        self.dealer_has_bottom = False
-        self.bottom_pending = False
-        self.original_bottom_cards = []  # 清空原始底牌
-        self.bidding_turn_player_id = None
-        self._bidding_queue = []
+        
+        # 重置一轮游戏的状态
+        self._reset_round_state()
+        
+        # 清空准备状态（第一局特有）
+        self.players_ready_for_next_round = set()
+        self.players_ready_to_start = set()
         
         # 创建并洗牌
         deck = self.card_system.create_deck()
@@ -114,27 +151,6 @@ class GameState:
         # 清空玩家手牌
         for p in self.room.players:
             p.cards = []
-        
-        # 清空亮主记录
-        self.bidding_cards = {}
-        self.bidding_display_cards = {}
-        
-        # 重置分数
-        self.idle_score = 0
-        
-        # 清空游戏结束相关状态
-        self.players_ready_for_next_round = set()
-        self.players_ready_to_start = set()  # 清空开始游戏的准备状态
-        self.round_summary = None
-        
-        # 清空出牌记录
-        self.current_trick = []
-        self.current_trick_with_player = []
-        self.last_trick = []
-        self.trick_leader = None
-        
-        # 清空扣底信息
-        self.bottom_bonus_info = None
         
         # 发牌顺序：第一局随机选择一名玩家开始，后续局从庄家开始
         if self.is_first_round:
@@ -714,23 +730,13 @@ class GameState:
         # 标记不再是第一局
         self.is_first_round = False
         
-        # 重置游戏状态
+        # 只设置游戏阶段为等待状态
+        # 不清空任何游戏数据，保留供前端查看（round_summary等）
+        # 所有数据的清空将在下一轮start_next_round()时进行
         self.game_phase = "waiting"
-        self.trump_locked = False
-        self.trump_suit = None  # 清空主牌花色
-        self.room.trump_suit = None  # 清空房间的主牌花色
-        self.dealer_has_bottom = False
-        self.current_trick = []
-        self.current_trick_with_player = []
-        self.last_trick = []
-        self.trick_leader = None
-        self.bidding_cards = {}
-        self.bidding_display_cards = {}
-        self.idle_score = 0  # 重置闲家得分
-        self.players_ready_for_next_round = set()  # 清空ready状态
-        self.players_ready_to_start = set()  # 清空开始游戏的准备状态
-        self.round_summary = None  # 清空本局总结
-        self.bottom_bonus_info = None  # 清空扣底信息
+        
+        # 清空准备状态，等待玩家准备下一轮
+        self.players_ready_for_next_round = set()
         
         return True
     
@@ -1193,13 +1199,6 @@ class GameState:
             if self.is_first_round:
                 self.fixed_dealer_position = self.dealer_position
         
-        # 调用end_round来重置状态（但不改变庄家，因为已经设置好了）
-        # 注意：end_round会重置game_phase为waiting，但我们会立即开始下一局
-        self.end_round(self.idle_score)
-        
-        # 清空round_summary
-        self.round_summary = None
-        
         # 直接开始下一轮游戏（不等待玩家再次准备）
         # 注意：这里不检查players_ready_to_start，因为所有玩家已经通过ready_for_next_round准备好了
         if self.fixed_dealer_position is not None:
@@ -1216,16 +1215,8 @@ class GameState:
         # 更新bidding_system使用新庄家级别
         self.bidding_system = BiddingSystem(new_dealer_level)
         
-        self.room.status = GameStatus.PLAYING
-        self.game_phase = "dealing"
-        self.trump_locked = False
-        self.trump_suit = None  # 清空主牌花色（新一局开始时）
-        self.room.trump_suit = None  # 清空房间的主牌花色
-        self.card_playing_system = None  # 清空出牌系统（确保使用新的trump_suit重新初始化）
-        self.dealer_has_bottom = False
-        self.bottom_pending = False
-        self.bidding_turn_player_id = None
-        self._bidding_queue = []
+        # 重置一轮游戏的状态
+        self._reset_round_state()
         
         # 创建并洗牌
         deck = self.card_system.create_deck()
@@ -1238,22 +1229,6 @@ class GameState:
         # 清空玩家手牌
         for p in self.room.players:
             p.cards = []
-        
-        # 清空亮主记录
-        self.bidding_cards = {}
-        self.bidding_display_cards = {}
-        
-        # 重置分数
-        self.idle_score = 0
-        
-        # 清空出牌记录
-        self.current_trick = []
-        self.current_trick_with_player = []
-        self.last_trick = []
-        self.trick_leader = None
-        
-        # 清空扣底信息
-        self.bottom_bonus_info = None
         
         # 发牌顺序：从庄家开始
         self._set_dealing_order_from_dealer()
