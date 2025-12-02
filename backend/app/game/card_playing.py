@@ -359,19 +359,6 @@ class CardPlayingSystem:
                         # 对子不足，必须将所有对子出完
                         if follow_total_pairs < hand_total_pairs:
                             return PlayResult(False, f"对子不足时必须将所有对子出完（手中有{hand_total_pairs}个对子，只出了{follow_total_pairs}个）")
-                
-                # 检查是否将对子拆成了单张
-                # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
-                hand_card_keys = [(c.rank, c.suit) for c in same_suit_cards]
-                follow_card_keys = [(c.rank, c.suit) for c in same_suit_in_cards]
-                hand_key_counts = Counter(hand_card_keys)
-                follow_key_counts = Counter(follow_card_keys)
-                for (rank, suit), count in hand_key_counts.items():
-                    if count >= 2:  # 手中有这个(rank, suit)的对子
-                        follow_count = follow_key_counts.get((rank, suit), 0)
-                        # 如果手中有对子，但跟的牌中这个(rank, suit)只有1张，说明拆了对子，这是不允许的
-                        if follow_count == 1:
-                            return PlayResult(False, "有该花色对子必须出对子，不能拆成单张")
         
         return PlayResult(True, "拖拉机跟牌规则检查通过")
     
@@ -533,14 +520,6 @@ class CardPlayingSystem:
                     # 如果对子不足，必须将所有对子出完
                     if remaining_pairs_in_follow < pairs_in_hand:
                         return PlayResult(False, f"对子不足时必须将所有对子出完（手中有{pairs_in_hand}个对子，只出了{remaining_pairs_in_follow}个）")
-                
-                # 4. 检查是否将对子拆成了单张
-                for (rank, suit), count in hand_key_counts.items():
-                    if count >= 2:  # 手中有这个(rank, suit)的对子
-                        follow_count = remaining_follow_key_counts.get((rank, suit), 0)
-                        # 如果手中有对子，但跟的牌中这个(rank, suit)只有1张，说明拆了对子，这是不允许的
-                        if follow_count == 1:
-                            return PlayResult(False, "有该花色对子必须出对子，不能拆成单张")
         
         return PlayResult(True, "甩牌跟牌规则检查通过")
     
