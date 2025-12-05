@@ -21,6 +21,9 @@ export const useGameStore = defineStore('game', {
     last_trick: [] as Array<{ player_id: string; player_position: string; cards: string[] }>,
     current_player: null as string | null,  // 当前应该出牌的玩家位置
     waitingForNextTrick: false,  // 标志：一轮刚结束，等待新一轮开始（用于保留上一轮的牌显示）
+    // 倒计时相关状态
+    countdown: 24,  // 当前倒计时秒数
+    countdownActive: false,  // 倒计时是否激活
     // 仅用于演示：每家展示用的"手里标签"列表（真实游戏中只对本家给出具体牌）
     demoHands: { NORTH: [] as string[], WEST: [] as string[], SOUTH: [] as string[], EAST: [] as string[] } as Record<Pos, string[]>,
     // 本局游戏总结信息
@@ -60,6 +63,8 @@ export const useGameStore = defineStore('game', {
       total_players: 0,
       ready_players: [] as string[]
     },
+    // 自动出牌类型
+    auto_play_type: null as 'selected_cards' | 'auto_logic' | null,
   }),
   actions: {
     applySnapshot(s: any) {
@@ -109,6 +114,13 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof s.current_player === 'string') {
         this.current_player = s.current_player
+      }
+      // 处理倒计时相关信息
+      if (typeof s.countdown === 'number') {
+        this.countdown = s.countdown
+      }
+      if (typeof s.countdown_active === 'boolean') {
+        this.countdownActive = s.countdown_active
       }
       if (Array.isArray(s.my_hand_sorted)) {
         // 前端需知道自己位置；此处略过，仅占位
@@ -349,6 +361,51 @@ export const useGameStore = defineStore('game', {
         if (Array.isArray(e.ready_to_start.ready_players)) {
           this.ready_to_start.ready_players = e.ready_to_start.ready_players
         }
+      }
+    },
+    applyCountdownUpdated(e: { countdown?: number; countdown_active?: boolean }) {
+      if (typeof e.countdown === 'number') {
+        this.countdown = e.countdown
+      }
+      if (typeof e.countdown_active === 'boolean') {
+        this.countdownActive = e.countdown_active
+      }
+    },
+    applyAutoPlay(e: { success: boolean; message?: string; played_cards?: string[]; current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string; slingshot_failed?: boolean }>; trick_complete?: boolean; current_player?: string; play_type?: 'selected_cards' | 'auto_logic' }) {
+      // 处理auto_play消息
+      console.log('[GameStore] applyAutoPlay:', e)
+      
+      // 保存自动出牌类型
+      this.auto_play_type = e.play_type;
+      
+      // 如果有current_trick，更新当前轮次的牌
+      if (Array.isArray(e.current_trick)) {
+        // 兼容旧的card字段，转换为cards数组
+        this.current_trick = e.current_trick.map((item: any) => {
+          const mapped: any = {};
+          if (item.cards) {
+            mapped.cards = item.cards;
+          } else if (item.card) {
+            mapped.cards = [item.card];
+          }
+          // 保留其他字段，包括slingshot_failed标记
+          return { ...item, ...mapped };
+        });
+        
+        // 如果是新的一轮开始（领出，current_trick.length === 1），先清空上一轮的牌
+        if (e.current_trick.length === 1) {
+          this.waitingForNextTrick = false;
+        }
+      }
+      
+      // 如果一轮完成，设置标志
+      if (e.trick_complete) {
+        this.waitingForNextTrick = true;
+      }
+      
+      // 更新当前玩家
+      if (typeof e.current_player === 'string') {
+        this.current_player = e.current_player;
       }
     }
   },

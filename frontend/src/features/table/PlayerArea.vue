@@ -330,8 +330,12 @@ function getCardStyle(index: number): Record<string, string> {
   const cardWidth = 60
   const cardHeight = 84
   
-  // 检查是否悬停
+  // 检查是否悬停或选中
   const isHovered = hoveredIndex.value === index && props.selectable
+  const selected = isSelected(index)
+  
+  // 提升高度：卡牌高度的15%-20%，约13px
+  const liftHeight = 13
   
   // 根据位置确定堆叠方向
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
@@ -342,16 +346,22 @@ function getCardStyle(index: number): Record<string, string> {
     const totalWidth = handTotalSize.value
     const centerOffset = totalWidth / 2
     
-    // 悬停时向上移动15px，保持垂直居中
-    const transform = isHovered 
-      ? 'translateY(calc(-50% - 15px))' 
-      : 'translateY(-50%)'
+    // 选中或悬停时向上移动
+    let translateY = -50
+    if (selected) {
+      translateY -= liftHeight
+    } else if (isHovered) {
+      translateY -= liftHeight
+    }
+    
+    const transform = `translateY(calc(${translateY}%))`
     
     return {
       left: `calc(50% - ${centerOffset}px + ${offset}px)`,
       top: '50%',
       zIndex: `${index + 1}`, // 后面的卡在上层，保持堆叠顺序
-      transform: transform
+      transform: transform,
+      transition: 'transform 0.2s ease-in-out' // 平滑过渡动画
     }
   } else {
     // 纵向堆叠（上下方向）：后面的卡向下偏移
@@ -360,16 +370,22 @@ function getCardStyle(index: number): Record<string, string> {
     const totalHeight = handTotalSize.value
     const centerOffset = totalHeight / 2
     
-    // 悬停时向上移动15px，保持水平居中
-    const transform = isHovered 
-      ? 'translateX(-50%) translateY(-15px)' 
-      : 'translateX(-50%)'
+    // 选中或悬停时向上移动
+    let translateY = 0
+    if (selected) {
+      translateY -= liftHeight
+    } else if (isHovered) {
+      translateY -= liftHeight
+    }
+    
+    const transform = `translateX(-50%) translateY(${translateY}px)`
     
     return {
       top: `calc(50% - ${centerOffset}px + ${offset}px)`,
       left: '50%',
       zIndex: `${index + 1}`, // 后面的卡在上层，保持堆叠顺序
-      transform: transform
+      transform: transform,
+      transition: 'transform 0.2s ease-in-out' // 平滑过渡动画
     }
   }
 }
