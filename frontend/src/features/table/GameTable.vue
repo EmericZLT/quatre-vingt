@@ -1,5 +1,15 @@
 <template>
-  <div class="game-table-container min-h-screen bg-gradient-to-br from-green-900 to-green-800" :class="{ 'mobile-rotated': isMobile }">
+  <div class="game-table-container min-h-screen bg-gradient-to-br from-emerald-800 via-emerald-700 to-emerald-900" :class="{ 'mobile-rotated': isMobile }">
+    <!-- 中央提示框（用于显示甩牌失败等全局提示） -->
+    <div
+      v-if="centerNotification.show"
+      class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-red-900/90 text-white px-6 py-4 rounded-lg shadow-2xl border-2 border-red-500"
+    >
+      <div class="text-xl font-bold text-center">
+        {{ centerNotification.message }}
+      </div>
+    </div>
+
     <!-- 移动端旋转包装器 -->
     <div 
       v-if="isMobile" 
@@ -46,9 +56,15 @@
 
       <!-- 牌桌主体（移动端） -->
       <div class="mobile-table-container">
-        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 mobile-table-inner">
+        <div class="relative bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-950 rounded-3xl shadow-2xl p-8 mobile-table-inner">
+          <!-- 阴刻文字 -->
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div class="text-[60px] font-bold text-emerald-950/30 tracking-wider select-none" style="text-shadow: inset 0 2px 4px rgba(0,0,0,0.5);">
+              Quatre-Vingt
+            </div>
+          </div>
         <!-- 左上角：级牌、主牌、庄家信息 -->
-        <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
+        <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none select-none">
           <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
           <div>主牌花色：<span class="font-semibold">{{ displayTrumpSuit }}</span></div>
           <div>庄家：<span class="font-semibold">{{ dealerLabel }}</span></div>
@@ -58,21 +74,11 @@
           <div v-if="phase === 'playing' && currentTrickMaxPlayer">本轮最大：<span class="font-semibold">{{ currentTrickMaxPlayer }}</span></div>
         </div>
         <!-- 右上角：闲家总得分 -->
-        <div class="absolute top-4 right-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
+        <div class="absolute top-4 right-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none select-none">
           <div class="text-amber-200 font-semibold mb-1">闲家得分</div>
           <div class="text-lg font-bold text-amber-300">{{ idleScoreTotal }}</div>
         </div>
         <!-- 中央区域（底牌已完全隐藏，通过右上角按钮查看） -->
-        
-        <!-- 中央提示框（用于显示甩牌失败等全局提示） -->
-        <div
-          v-if="centerNotification.show"
-          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-red-900/90 text-white px-6 py-4 rounded-lg shadow-2xl border-2 border-red-500"
-        >
-          <div class="text-xl font-bold text-center">
-            {{ centerNotification.message }}
-          </div>
-        </div>
 
         <!-- 查看总结按钮（当总结隐藏时，显示在屏幕中央） -->
         <div
@@ -221,12 +227,12 @@
         </div>
 
         <!-- 顶部（上方） -->
-        <div class="absolute top-8 left-1/2 transform -translate-x-1/2 z-20">
+        <div class="absolute top-8 left-1/2 transform -translate-x-1/2" :class="isPlayerCurrentPlayer(viewMap.top) ? 'z-50' : 'z-20'">
           <PlayerArea 
             position="NORTH"
             :cards="getPlayerHand(viewMap.top)"
             :cardsCount="getPlayerCardsCount(viewMap.top)"
-            :isCurrentPlayer="false"
+            :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.top)"
             :displayName="getSeatName(viewMap.top)"
             :biddingCards="getBiddingCards(viewMap.top)"
             :playedCards="getPlayedCards(viewMap.top)"
@@ -236,12 +242,12 @@
         </div>
 
         <!-- 左侧 -->
-        <div class="absolute left-8 top-1/2 transform -translate-y-1/2 z-20">
+        <div class="absolute left-8 top-1/2 transform -translate-y-1/2" :class="isPlayerCurrentPlayer(viewMap.left) ? 'z-50' : 'z-20'">
           <PlayerArea 
             position="WEST"
             :cards="getPlayerHand(viewMap.left)"
             :cardsCount="getPlayerCardsCount(viewMap.left)"
-            :isCurrentPlayer="false"
+            :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.left)"
             :displayName="getSeatName(viewMap.left)"
             :biddingCards="getBiddingCards(viewMap.left)"
             :playedCards="getPlayedCards(viewMap.left)"
@@ -251,12 +257,12 @@
         </div>
 
         <!-- 底部（下方，当前玩家视角） -->
-        <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+        <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2" :class="isPlayerCurrentPlayer(viewMap.bottom) ? 'z-50' : 'z-20'">
           <PlayerArea
             position="SOUTH"
             :cards="getPlayerHand(viewMap.bottom)"
             :cardsCount="getPlayerCardsCount(viewMap.bottom)"
-            :isCurrentPlayer="true"
+            :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.bottom)"
             :displayName="getSeatName(viewMap.bottom)"
             :biddingCards="getBiddingCards(viewMap.bottom)"
             :playedCards="getPlayedCards(viewMap.bottom)"
@@ -345,8 +351,7 @@
             class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
           >
             <div class="flex items-center justify-between mb-3">
-              <div class="text-sm flex items-center gap-2">
-                <CountdownClock />
+              <div class="text-sm">
                 出牌：请选择要出的牌（单张、对子、连对或甩牌）
               </div>
               <div v-if="selectedCards.length > 0" class="text-xs text-amber-200">
@@ -389,20 +394,19 @@
             v-else-if="phase === 'playing' && !isMyTurn"
             class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto text-center"
           >
-            <div class="text-sm text-amber-200 flex items-center justify-center gap-2">
-              <CountdownClock />
+            <div class="text-sm text-amber-200 text-center">
               <span>等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌</span>
             </div>
           </div>
         </div>
 
         <!-- 右侧 -->
-        <div class="absolute right-8 top-1/2 transform -translate-y-1/2 z-20">
+        <div class="absolute right-8 top-1/2 transform -translate-y-1/2" :class="isPlayerCurrentPlayer(viewMap.right) ? 'z-50' : 'z-20'">
           <PlayerArea 
             position="EAST"
             :cards="getPlayerHand(viewMap.right)"
             :cardsCount="getPlayerCardsCount(viewMap.right)"
-            :isCurrentPlayer="false"
+            :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.right)"
             :displayName="getSeatName(viewMap.right)"
             :biddingCards="getBiddingCards(viewMap.right)"
             :playedCards="getPlayedCards(viewMap.right)"
@@ -466,7 +470,13 @@
 
       <!-- 牌桌主体 -->
       <div class="max-w-7xl mx-auto p-4">
-        <div class="relative bg-gradient-to-br from-amber-900 to-amber-800 rounded-3xl shadow-2xl p-8 min-h-[700px]">
+        <div class="relative bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-950 rounded-3xl shadow-2xl p-8 min-h-[700px]">
+          <!-- 阴刻文字 -->
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div class="text-[120px] font-bold text-emerald-950/30 tracking-wider select-none" style="text-shadow: inset 0 2px 4px rgba(0,0,0,0.5);">
+              Quatre-Vingt
+            </div>
+          </div>
           <!-- 左上角：级牌、主牌、庄家信息 -->
           <div class="absolute top-4 left-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
             <div>当前级牌：<span class="font-semibold">{{ levelRankLabel }}</span></div>
@@ -481,16 +491,6 @@
           <div class="absolute top-4 right-4 z-30 bg-slate-900/80 text-slate-100 rounded px-3 py-2 text-sm space-y-1 pointer-events-none">
             <div class="text-amber-200 font-semibold mb-1">闲家得分</div>
             <div class="text-lg font-bold text-amber-300">{{ idleScoreTotal }}</div>
-          </div>
-          
-          <!-- 中央提示框（用于显示甩牌失败等全局提示） -->
-          <div
-            v-if="centerNotification.show"
-            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-red-900/90 text-white px-6 py-4 rounded-lg shadow-2xl border-2 border-red-500"
-          >
-            <div class="text-xl font-bold text-center">
-              {{ centerNotification.message }}
-            </div>
           </div>
 
           <!-- 查看总结按钮（当总结隐藏时，显示在屏幕中央） -->
@@ -640,12 +640,12 @@
           </div>
 
           <!-- 顶部（上方） -->
-          <div class="absolute top-8 left-1/2 transform -translate-x-1/2 z-20">
+          <div class="absolute top-8 left-1/2 transform -translate-x-1/2" :class="isPlayerCurrentPlayer(viewMap.top) ? 'z-50' : 'z-20'">
             <PlayerArea 
               position="NORTH"
               :cards="getPlayerHand(viewMap.top)"
               :cardsCount="getPlayerCardsCount(viewMap.top)"
-              :isCurrentPlayer="false"
+              :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.top)"
               :displayName="getSeatName(viewMap.top)"
               :biddingCards="getBiddingCards(viewMap.top)"
               :playedCards="getPlayedCards(viewMap.top)"
@@ -655,12 +655,12 @@
           </div>
 
           <!-- 左侧 -->
-          <div class="absolute left-8 top-1/2 transform -translate-y-1/2 z-20">
+          <div class="absolute left-8 top-1/2 transform -translate-y-1/2" :class="isPlayerCurrentPlayer(viewMap.left) ? 'z-50' : 'z-20'">
             <PlayerArea 
               position="WEST"
               :cards="getPlayerHand(viewMap.left)"
               :cardsCount="getPlayerCardsCount(viewMap.left)"
-              :isCurrentPlayer="false"
+              :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.left)"
               :displayName="getSeatName(viewMap.left)"
               :biddingCards="getBiddingCards(viewMap.left)"
               :playedCards="getPlayedCards(viewMap.left)"
@@ -670,12 +670,12 @@
           </div>
 
           <!-- 底部（下方，当前玩家视角） -->
-          <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20">
+          <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2" :class="isPlayerCurrentPlayer(viewMap.bottom) ? 'z-50' : 'z-20'">
             <PlayerArea
               position="SOUTH"
               :cards="getPlayerHand(viewMap.bottom)"
               :cardsCount="getPlayerCardsCount(viewMap.bottom)"
-              :isCurrentPlayer="true"
+              :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.bottom)"
               :displayName="getSeatName(viewMap.bottom)"
               :biddingCards="getBiddingCards(viewMap.bottom)"
               :playedCards="getPlayedCards(viewMap.bottom)"
@@ -764,10 +764,9 @@
               class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
             >
               <div class="flex items-center justify-between mb-3">
-                <div class="text-sm flex items-center gap-2">
-                  <CountdownClock />
-                  出牌：请选择要出的牌（单张、对子、连对或甩牌）
-                </div>
+                <div class="text-sm">
+                出牌：请选择要出的牌（单张、对子、连对或甩牌）
+              </div>
                 <div v-if="selectedCards.length > 0" class="text-xs text-amber-200">
                   已选 <span class="font-semibold">{{ selectedCards.length }}</span> 张
                 </div>
@@ -808,20 +807,19 @@
               v-else-if="phase === 'playing' && !isMyTurn"
               class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto text-center"
             >
-              <div class="text-sm text-amber-200 flex items-center justify-center gap-2">
-                <CountdownClock />
+              <div class="text-sm text-amber-200 text-center">
                 <span>等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌</span>
               </div>
             </div>
           </div>
 
           <!-- 右侧 -->
-          <div class="absolute right-8 top-1/2 transform -translate-y-1/2 z-20">
+          <div class="absolute right-8 top-1/2 transform -translate-y-1/2" :class="isPlayerCurrentPlayer(viewMap.right) ? 'z-50' : 'z-20'">
             <PlayerArea 
               position="EAST"
               :cards="getPlayerHand(viewMap.right)"
               :cardsCount="getPlayerCardsCount(viewMap.right)"
-              :isCurrentPlayer="false"
+              :isCurrentPlayer="isPlayerCurrentPlayer(viewMap.right)"
               :displayName="getSeatName(viewMap.right)"
               :biddingCards="getBiddingCards(viewMap.right)"
               :playedCards="getPlayedCards(viewMap.right)"
@@ -1151,7 +1149,7 @@ const playerId = computed(() => roomStore.playerId)
 const myPosition = computed(() => roomStore.playerPosition as Pos)
 const roomName = computed(() => roomStore.roomName)
 const isHost = computed(() => !!roomStore.ownerId && roomStore.ownerId === roomStore.playerId)
-const canStart = computed(() => (Array.isArray(players.value) ? players.value.length : 0) === 4)
+const canStart = computed(() => (Array.isArray(players.value) ? players.value?.length : 0) === 4)
 const currentLevel = ref<number | string>('?')
 const trumpSuit = ref<string | null>(null)
 const biddingStatus = ref<any>(null)
@@ -1381,7 +1379,7 @@ function handleImageError(event: Event) {
 
 // 根据位置获取玩家名称
 function getPlayerNameByPosition(pos: Pos): string {
-  const player = players.value.find(p => (p.position as string)?.toUpperCase() === pos)
+  const player = players.value?.find(p => (p.position as string)?.toUpperCase() === pos)
   return player?.name || getPosLabel(pos)
 }
 
@@ -1987,7 +1985,7 @@ function getPlayerHand(pos: Pos): string[] {
 
 // 检查玩家是否已准备（scoring阶段或waiting阶段）
 function isPlayerReady(pos: Pos): boolean {
-  const player = players.value.find(p => (p.position as string)?.toUpperCase() === pos)
+  const player = players.value?.find(p => (p.position as string)?.toUpperCase() === pos)
   if (!player || !player.id) return false
   
   if (phase.value === 'scoring') {
@@ -1996,6 +1994,23 @@ function isPlayerReady(pos: Pos): boolean {
     return game.ready_to_start.ready_players?.includes(player.id) || false
   }
   return false
+}
+
+// 判断某个位置的玩家是否应该显示为当前玩家
+function isPlayerCurrentPlayer(pos: Pos): boolean {
+  // 在发牌和选主阶段，所有玩家都显示为当前玩家样式
+  if (phase.value === 'dealing' || phase.value === 'bidding') {
+    return true
+  }
+  
+  // 在扣底阶段，只有庄家显示为当前玩家样式
+  if (phase.value === 'bottom') {
+    const player = players.value?.find((p: any) => (p.position as string)?.toUpperCase() === pos)
+    return player?.id === dealer_player_id.value
+  }
+  
+  // 在其他阶段，只有当前出牌的玩家显示为当前玩家样式
+  return currentPlayerPosition.value === pos
 }
 
 // 是否显示准备状态（scoring阶段或waiting阶段）
@@ -2208,7 +2223,7 @@ onMounted(() => {
         if (msg.current_trick_max_player_name) {
           currentTrickMaxPlayer.value = msg.current_trick_max_player_name
         } else {
-          const maxPlayer = players.value.find((p: any) => p.id === msg.current_trick_max_player_id)
+          const maxPlayer = players.value?.find((p: any) => p.id === msg.current_trick_max_player_id)
           if (maxPlayer && maxPlayer.name) {
             currentTrickMaxPlayer.value = maxPlayer.name
           }

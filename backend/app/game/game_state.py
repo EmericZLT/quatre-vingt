@@ -351,8 +351,6 @@ class GameState:
 
     def finish_bidding(self) -> bool:
         """结束亮主阶段"""
-        if self.game_phase not in ["bidding"]:
-            return False
         # 必须发完100张牌后方可结束亮主
         if not self.is_dealing_complete():
             return False
@@ -393,8 +391,8 @@ class GameState:
             
             # 庄家自动获得底牌，进入扣底阶段
             bottom_taken = self.give_bottom_to_dealer()
-            self.bottom_pending = True if bottom_taken else False
-            self.game_phase = "bottom" if bottom_taken else "playing"
+            self.bottom_pending = True
+            self.game_phase = "bottom"
             self.trump_locked = True
             return True
         else:

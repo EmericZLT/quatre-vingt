@@ -11,10 +11,18 @@
         'player-info-top': !isCurrentPlayer && position !== 'NORTH' 
       }"
     >
-      <div class="text-sm font-semibold text-white" :class="(isCurrentPlayer || position === 'NORTH') ? 'text-left' : 'text-center'">
-        {{ displayName || (position === 'NORTH' ? '北' : position === 'SOUTH' ? '南' : position === 'EAST' ? '东' : '西') + '家' }}
+      <div class="flex items-center gap-2" :class="(isCurrentPlayer || position === 'NORTH') ? 'justify-start' : 'justify-center'">
+        <div class="text-sm font-semibold text-white">
+          {{ displayName || (position === 'NORTH' ? '北' : position === 'SOUTH' ? '南' : position === 'EAST' ? '东' : '西') + '家' }}
+        </div>
+        <!-- 仅当前玩家显示倒计时，但在发牌、选主和等待阶段不显示 -->
+        <div v-if="isCurrentPlayer && gameStore.phase !== 'dealing' && gameStore.phase !== 'bidding' && gameStore.phase !== 'waiting'" class="countdown-wrapper">
+          <CountdownClock />
+        </div>
       </div>
-      <div class="text-xs text-amber-200" :class="(isCurrentPlayer || position === 'NORTH') ? 'text-left' : 'text-center'">{{ cardsCount }} 张</div>
+      <div class="text-xs text-amber-200" :class="(isCurrentPlayer || position === 'NORTH') ? 'text-left' : 'text-center'">
+        {{ cardsCount }} 张
+      </div>
     </div>
 
     <div class="hand-wrapper relative">
@@ -99,6 +107,8 @@
 import { computed, ref } from 'vue'
 import { getCardImageFromString, parseCardString } from '@/utils/cards'
 import { throttle, debounce } from '@/utils/throttle'
+import CountdownClock from '@/components/CountdownClock.vue'
+import { useGameStore } from '@/stores/game'
 
 interface Props {
   position: 'NORTH' | 'WEST' | 'SOUTH' | 'EAST'
@@ -130,6 +140,9 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'card-click', index: number): void
 }>()
+
+// 游戏状态
+const gameStore = useGameStore()
 
 // 鼠标悬停状态（使用节流控制）
 const hoveredIndex = ref<number | null>(null)
@@ -270,11 +283,27 @@ function getHandAreaClass(): string {
   return `${baseClass} ${positionClass}`
 }
 
-// 计算偏移量：当前玩家使用较大偏移（18px），其他玩家使用较小偏移（8px）以堆叠更紧密
+// 计算偏移量：根据游戏阶段调整
 const offsetStep = computed(() => {
-  // 当前玩家的手牌需要看清楚，使用较大偏移
-  // 其他玩家的背面牌可以堆叠更紧密
-  return props.isCurrentPlayer ? 18 : 8
+  // 在发牌阶段和选主阶段，所有玩家都使用较大偏移
+  // 在出牌阶段，只有当前玩家使用较大偏移
+  // 在底牌阶段，只有定主方使用较大偏移
+  // 在其他阶段，只有当前玩家使用较大偏移
+  if (gameStore.phase === 'dealing' || gameStore.phase === 'bidding') {
+    return 20 // 所有玩家都使用较大偏移
+  } else if (gameStore.phase === 'playing') {
+    // 出牌阶段，只有当前玩家使用较大偏移
+    return props.isCurrentPlayer ? 20 : 10
+  } else if (gameStore.phase === 'bottom') {
+    // 底牌阶段，只有定主方使用较大偏移
+    return props.isCurrentPlayer ? 20 : 10
+  } else if (gameStore.phase === 'waiting') {
+    // 等待阶段，所有玩家都使用较小偏移
+    return 10
+  } else {
+    // 其他阶段，只有当前玩家使用较大偏移
+    return props.isCurrentPlayer ? 20 : 10
+  }
 })
 
 // 计算手牌总宽度（横向）或总高度（纵向）
@@ -296,9 +325,35 @@ const handTotalSize = computed(() => {
 
 // 获取手牌区域的样式（动态调整大小）
 function getHandAreaStyle(): Record<string, string> {
-  // 当前玩家的手牌区域需要更大，其他玩家的可以更小
-  const minSize = props.isCurrentPlayer ? 300 : 200
-  const padding = props.isCurrentPlayer ? 40 : 20
+  // 根据游戏阶段调整手牌区域大小
+  // 在发牌阶段和选主阶段，所有玩家都使用较大的手牌区域
+  // 在出牌阶段，只有当前玩家使用较大的手牌区域
+  // 在底牌阶段，只有定主方使用较大的手牌区域
+  // 在等待阶段，所有玩家都使用较小的手牌区域
+  // 在其他阶段，只有当前玩家使用较大的手牌区域
+  let minSize: number, padding: number
+  if (gameStore.phase === 'dealing' || gameStore.phase === 'bidding') {
+    minSize = 300 // 所有玩家都使用较大的手牌区域
+    padding = 40
+  } else if (gameStore.phase === 'playing') {
+    // 出牌阶段，只有当前玩家使用较大的手牌区域
+    minSize = props.isCurrentPlayer ? 300 : 200
+    padding = props.isCurrentPlayer ? 40 : 20
+  } else if (gameStore.phase === 'bottom') {
+    // 底牌阶段，只有定主方使用较大的手牌区域
+    // TODO: 需要从biddingStatus或其他地方获取定主方信息
+    // 暂时假设如果是当前玩家则使用较大手牌区域
+    minSize = props.isCurrentPlayer ? 300 : 200
+    padding = props.isCurrentPlayer ? 40 : 20
+  } else if (gameStore.phase === 'waiting') {
+    // 等待阶段：所有玩家都使用较小的手牌区域
+    minSize = 200
+    padding = 20
+  } else {
+    // 其他阶段，只有当前玩家使用较大的手牌区域
+    minSize = props.isCurrentPlayer ? 300 : 200
+    padding = props.isCurrentPlayer ? 40 : 20
+  }
   const cardWidth = 60 // 单张卡牌宽度
   
   if (props.position === 'NORTH' || props.position === 'SOUTH') {
@@ -634,6 +689,11 @@ function handleCardClick(index: number, cardStr: string) {
   min-width: 120px;
   /* 确保手牌区域显示在已打出的牌（z-index: 15）之上 */
   z-index: 25;
+}
+
+/* 当前玩家的手牌区域应该有更高的 z-index，确保不被其他玩家遮挡 */
+.player-area.current-player .hand-area {
+  z-index: 100;
 }
 
 /* 横向排列（北、南） */

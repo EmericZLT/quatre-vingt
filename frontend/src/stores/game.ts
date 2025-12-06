@@ -114,13 +114,17 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof s.current_player === 'string') {
         this.current_player = s.current_player
-      }
-      // 处理倒计时相关信息
-      if (typeof s.countdown === 'number') {
-        this.countdown = s.countdown
-      }
-      if (typeof s.countdown_active === 'boolean') {
-        this.countdownActive = s.countdown_active
+        // 当玩家切换时，重置倒计时为24秒
+        this.countdown = 24
+        this.countdownActive = true
+      } else {
+        // 处理倒计时相关信息
+        if (typeof s.countdown === 'number') {
+          this.countdown = s.countdown
+        }
+        if (typeof s.countdown_active === 'boolean') {
+          this.countdownActive = s.countdown_active
+        }
       }
       if (Array.isArray(s.my_hand_sorted)) {
         // 前端需知道自己位置；此处略过，仅占位
@@ -242,6 +246,9 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player
+        // 当玩家切换时，重置倒计时为24秒
+        this.countdown = 24
+        this.countdownActive = true
       }
     },
     applyTrickComplete(e: { last_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; tricks_won?: { north_south: number; east_west: number }; current_player?: string; idle_score?: number }) {
@@ -286,6 +293,9 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player
+        // 当玩家切换时，重置倒计时为24秒
+        this.countdown = 24
+        this.countdownActive = true
       }
     },
     resetDemoHands() {
@@ -406,6 +416,9 @@ export const useGameStore = defineStore('game', {
       // 更新当前玩家
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player;
+        // 当玩家切换时，重置倒计时为24秒
+        this.countdown = 24
+        this.countdownActive = true
       }
     }
   },

@@ -27,24 +27,28 @@ const countdown = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: #2d3748;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(100, 139, 112, 0.5);
   color: white;
-  border-radius: 9999px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-radius: 0.5rem;
+  box-shadow: none;
   font-weight: bold;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   transition: all 0.3s ease;
 }
 
 .clock-icon {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
+  color: #fbbf24;
 }
 
 .countdown-time {
-  font-size: 1.5rem;
+  font-size: 1.1rem;
   font-family: 'Courier New', monospace;
+  color: #fbbf24;
+  min-width: 1.5rem;
+  text-align: center;
 }
 
 /* 闪烁动画 */
@@ -54,14 +58,13 @@ const countdown = computed(() => {
 
 @keyframes blink {
   from {
-    background-color: #2d3748;
-    color: white;
+    color: #fbbf24;
+    background-color: rgba(100, 116, 139, 0.5);
     transform: scale(1);
   }
   to {
-    background-color: #e53e3e;
-    color: white;
-    transform: scale(1.1);
+    color: #ffffff;
+    background-color: #ef4444;
   }
 }
 </style>
