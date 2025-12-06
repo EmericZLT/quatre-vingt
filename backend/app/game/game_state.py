@@ -28,6 +28,16 @@ class GameState:
         self.current_trick_with_player: List[Dict[str, Any]] = []  # 存储 {player_id, player_position, card}
         self.last_trick: List[Dict[str, Any]] = []  # 上一轮出牌信息
         self.trick_leader: Optional[PlayerPosition] = None
+        # 倒计时相关属性
+        self.max_play_time: int = 24  # 最大出牌时间（秒）
+        self.current_countdown: int = self.max_play_time  # 当前倒计时剩余时间
+        self.countdown_active: bool = False  # 倒计时是否处于激活状态
+        self.countdown_task: Optional[asyncio.Task] = None  # 倒计时任务引用
+        
+        # 当前玩家ID（用于WebSocket通信）
+        self.current_player_id: Optional[str] = None
+        # 当前玩家选中的卡牌（用于自动出牌功能）
+        self.selected_cards: Optional[List[Card]] = None
         # game_phase 状态说明：
         # - "waiting": 等待状态（初始状态，或一局结束后）
         #   * 变化时机：__init__() 初始化时，end_round() 结束时
@@ -118,6 +128,11 @@ class GameState:
         
         # 总结信息（新一轮开始时清空）
         self.round_summary = None
+        
+        # 重置倒计时
+        self.current_countdown = self.max_play_time
+        self.countdown_active = False
+        self.countdown_task = None
         
     def start_game(self) -> bool:
         """开始游戏（当所有玩家都准备时自动调用）"""
@@ -249,6 +264,9 @@ class GameState:
         self.game_phase = "playing"
         # 设置当前出牌玩家为庄家（第一轮由庄家领出）
         self.current_player = self.dealer_position
+        # 更新当前玩家ID
+        dealer = self.get_player_by_position(self.dealer_position)
+        self.current_player_id = dealer.id if dealer else None
         # 重置expected_leader为None，确保第一轮由庄家领出
         if self.card_playing_system:
             self.card_playing_system.expected_leader = None
@@ -616,6 +634,9 @@ class GameState:
             current_idx = positions.index(player.position)
             next_idx = (current_idx + 1) % 4
             self.current_player = positions[next_idx]
+            # 更新当前玩家ID
+            next_player = self.get_player_by_position(positions[next_idx])
+            self.current_player_id = next_player.id if next_player else None
         
         # 如果一轮出完，winner已经在上面处理过了，这里返回None或者从current_trick_max_player_id获取
         winner = None
@@ -648,6 +669,161 @@ class GameState:
             if player.position == position:
                 return player
         return None
+    
+    def reset_countdown(self):
+        """重置倒计时"""
+        self.current_countdown = self.max_play_time
+        self.countdown_active = False
+    
+    def start_countdown(self):
+        """开始倒计时"""
+        self.current_countdown = self.max_play_time
+        self.countdown_active = True
+    
+    def stop_countdown(self):
+        """停止倒计时"""
+        self.countdown_active = False
+    
+    def decrease_countdown(self) -> bool:
+        """减少倒计时1秒，返回是否倒计时已结束"""
+        if self.countdown_active and self.current_countdown > 0:
+            self.current_countdown -= 1
+            return self.current_countdown == 0
+        return False
+    
+    def auto_play(self) -> Dict[str, Any]:
+        """
+        自动出牌 - 支持优先使用玩家选中的卡牌
+        1. 若存在选中卡牌且符合当前出牌规则，则自动打出该选中卡牌
+        2. 若未选中任何卡牌，或选中的卡牌不符合出牌规则，则自动触发原有的跟牌逻辑
+        只关注规则合规性，不进行最优牌选择
+        
+        Returns:
+            Dict包含success、message等信息
+        """
+        if self.game_phase != "playing":
+            return {"success": False, "message": "当前不在出牌阶段"}
+        
+        # 获取当前玩家
+        current_player = self.get_player_by_position(self.current_player)
+        if not current_player:
+            return {"success": False, "message": "当前玩家不存在"}
+        
+        # 如果没有初始化出牌系统，初始化它
+        if self.card_playing_system is None:
+            self._init_card_playing_system()
+        
+        if self.card_playing_system is None:
+            return {"success": False, "message": "出牌系统未初始化"}
+        
+        # 检查当前游戏状态：是领出还是跟牌
+        is_leading = len(self.card_playing_system.current_trick) == 0
+        
+        # 获取当前玩家的位置
+        player_pos = current_player.position
+        if not player_pos:
+            return {"success": False, "message": "无法获取玩家位置"}
+        
+        # 优先检查并使用玩家选中的卡牌
+        if self.selected_cards and len(self.selected_cards) > 0:
+            # 验证选中的卡牌是否属于当前玩家
+            for card in self.selected_cards:
+                if card not in current_player.cards:
+                    # 选中的卡牌不属于当前玩家，重置选中卡牌并继续使用原有逻辑
+                    self.selected_cards = None
+                    break
+            
+            if self.selected_cards:  # 确认所有选中的卡牌都属于当前玩家
+                # 检查选中的卡牌数量是否符合当前轮次要求
+                if is_leading:
+                    # 领出时，任意数量的卡牌都可能符合规则，直接尝试出牌
+                    result = self.play_card(current_player.id, self.selected_cards)
+                    if result.get("success", False):
+                        # 保存选中的卡牌用于返回结果
+                        played_cards = self.selected_cards.copy()
+                        # 重置选中卡牌
+                        self.selected_cards = None
+                        result['played_cards'] = played_cards
+                        result['play_type'] = "selected_cards"
+                        return result
+                    else:
+                        # 检查是否有强制要求出的牌（甩牌失败的情况）
+                        forced_cards = result.get("forced_cards")
+                        if forced_cards:
+                            # 如果有强制要求出的牌，直接使用这些牌出牌
+                            # 保存强制出的牌用于返回结果
+                            result = self.play_card(current_player.id, forced_cards)
+                            if result.get("success", False):
+                                    # 重置选中卡牌
+                                    self.selected_cards = None
+                                    result['played_cards'] = forced_cards
+                                    result['play_type'] = "selected_cards"
+                                    return result
+                        # 选中的卡牌不符合领出规则且没有强制出的牌，重置选中卡牌并继续使用原有逻辑
+                        self.selected_cards = None
+                else:
+                    # 跟牌时，需要检查卡牌数量是否与领出的卡牌数量相同
+                    led_card_count = len(self.card_playing_system.led_cards)
+                    if len(self.selected_cards) == led_card_count:
+                        # 检查选中的卡牌是否符合跟牌规则
+                        check_result = self.card_playing_system._check_follow_rules(player_pos, self.selected_cards, current_player.cards)
+                        if check_result.success:
+                            # 选中的卡牌符合规则，尝试出牌
+                            result = self.play_card(current_player.id, self.selected_cards)
+                            if result.get("success", False):
+                                # 保存选中的卡牌用于返回结果
+                                played_cards = self.selected_cards.copy()
+                                # 重置选中卡牌
+                                self.selected_cards = None
+                                result['played_cards'] = played_cards
+                                result['play_type'] = "selected_cards"
+                                return result
+                            else:
+                                # 选中的卡牌不符合规则，重置选中卡牌并继续使用原有逻辑
+                                self.selected_cards = None
+                        else:
+                            # 选中的卡牌不符合跟牌规则，重置选中卡牌并继续使用原有逻辑
+                            self.selected_cards = None
+                    else:
+                        # 选中的卡牌数量不符合要求，重置选中卡牌并继续使用原有逻辑
+                        self.selected_cards = None
+            
+            # 选中的卡牌不符合规则或出牌失败，重置选中卡牌
+            self.selected_cards = None
+        
+        if is_leading:
+            # 领出情况：直接出第一张符合规则的单张牌
+            for card in current_player.cards:
+                result = self.play_card(current_player.id, [card])
+                if result.get("success", False):
+                    result['played_cards'] = [card]
+                    result['play_type'] = "auto_logic"
+                    return result
+        else:
+            # 跟牌情况：找到第一个符合规则的出牌组合
+            led_card_count = len(self.card_playing_system.led_cards)
+            
+            # 生成所有可能的相同数量的组合
+            from itertools import combinations
+            all_combinations = list(combinations(current_player.cards, led_card_count))
+            
+            # 遍历所有组合，找到第一个符合规则的组合
+            for combo in all_combinations:
+                combo_list = list(combo)
+                
+                # 直接调用_check_follow_rules方法验证是否符合跟牌规则
+                check_result = self.card_playing_system._check_follow_rules(player_pos, combo_list, current_player.cards)
+                
+                if check_result.success:
+                    # 找到符合规则的组合，尝试出牌
+                    result = self.play_card(current_player.id, combo_list)
+                    if result.get("success", False):
+                        result['played_cards'] = combo_list
+                        result['play_type'] = "auto_logic"
+                        return result
+        
+        # 如果没有找到可以出的牌，返回失败
+        return {"success": False, "message": "没有找到可以出的牌"}
     
     def get_sorted_cards(self, player_id: str) -> List[Card]:
         """
@@ -1363,6 +1539,9 @@ class GameState:
     def _update_next_round_leader(self, winner: PlayerPosition) -> None:
         """更新下一轮的领出者"""
         self.current_player = winner
+        # 更新当前玩家ID
+        winner_player = self.get_player_by_position(winner)
+        self.current_player_id = winner_player.id if winner_player else None
     
     def _save_and_reset_trick(self) -> None:
         """保存上一轮出牌信息并重置当前轮次状态"""

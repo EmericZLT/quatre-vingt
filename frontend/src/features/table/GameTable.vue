@@ -345,7 +345,10 @@
             class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
           >
             <div class="flex items-center justify-between mb-3">
-              <div class="text-sm">出牌：请选择要出的牌（单张、对子、连对或甩牌）</div>
+              <div class="text-sm flex items-center gap-2">
+                <CountdownClock />
+                出牌：请选择要出的牌（单张、对子、连对或甩牌）
+              </div>
               <div v-if="selectedCards.length > 0" class="text-xs text-amber-200">
                 已选 <span class="font-semibold">{{ selectedCards.length }}</span> 张
               </div>
@@ -386,8 +389,9 @@
             v-else-if="phase === 'playing' && !isMyTurn"
             class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto text-center"
           >
-            <div class="text-sm text-amber-200">
-              等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌
+            <div class="text-sm text-amber-200 flex items-center justify-center gap-2">
+              <CountdownClock />
+              <span>等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌</span>
             </div>
           </div>
         </div>
@@ -760,7 +764,10 @@
               class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto"
             >
               <div class="flex items-center justify-between mb-3">
-                <div class="text-sm">出牌：请选择要出的牌（单张、对子、连对或甩牌）</div>
+                <div class="text-sm flex items-center gap-2">
+                  <CountdownClock />
+                  出牌：请选择要出的牌（单张、对子、连对或甩牌）
+                </div>
                 <div v-if="selectedCards.length > 0" class="text-xs text-amber-200">
                   已选 <span class="font-semibold">{{ selectedCards.length }}</span> 张
                 </div>
@@ -801,8 +808,9 @@
               v-else-if="phase === 'playing' && !isMyTurn"
               class="mt-4 bg-slate-900/70 rounded px-4 py-3 text-slate-100 w-full max-w-xl mx-auto text-center"
             >
-              <div class="text-sm text-amber-200">
-                等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌
+              <div class="text-sm text-amber-200 flex items-center justify-center gap-2">
+                <CountdownClock />
+                <span>等待 <span class="font-semibold">{{ getPlayerNameByPosition(currentPlayerPosition || 'NORTH') }}</span> 出牌</span>
               </div>
             </div>
           </div>
@@ -944,6 +952,7 @@ import { useWsStore } from '@/stores/ws'
 import { useGameStore } from '@/stores/game'
 import { useRoomStore } from '@/stores/room'
 import PlayerArea from './PlayerArea.vue'
+import CountdownClock from '@/components/CountdownClock.vue'
 import { getCardImageFromString, parseCardString } from '@/utils/cards'
 import { getWebSocketUrl } from '@/config/env'
 import { useDeviceDetection } from '@/composables/useDeviceDetection'
@@ -1494,6 +1503,9 @@ function toggleCardSelection(index: number) {
     selectedCardIndicesForPlay.value.push(index)
   }
   playError.value = null // 清除错误信息
+  
+  // 发送选中的卡牌信息给后端
+  sendSelectedCardsToBackend()
 }
 
 const selectedCards = computed(() => {
@@ -1501,6 +1513,12 @@ const selectedCards = computed(() => {
     .map((idx) => myHand.value[idx])
     .filter((card): card is string => typeof card === 'string' && !!card)
 })
+
+// 监听selectedCards变化，发送给后端
+function sendSelectedCardsToBackend() {
+  if (!isMyTurn.value) return
+  ws.send({ type: 'select_cards', cards: selectedCards.value })
+}
 
 const canPlayCard = computed(() => {
   return isSelectingCard.value && selectedCards.value.length > 0 && !playingCard.value
@@ -2378,6 +2396,109 @@ watch(myHand, () => {
     resetBottomSelection()
   }
 })
+
+// 监听倒计时变化，实现自动出牌逻辑
+watch(
+  () => game.countdown,
+  (newCountdown: number | undefined) => {
+    // 只在我的回合、倒计时激活且倒计时归零时执行自动出牌
+    if (isMyTurn.value && game.countdownActive && newCountdown === 0 && !playingCard.value && phase.value === 'playing') {
+      handleAutoPlayOnCountdownZero()
+    }
+  },
+  { immediate: true }
+)
+
+// 倒计时归零时的自动出牌处理
+async function handleAutoPlayOnCountdownZero() {
+  // a) 检测当前是否有用户已选中的卡牌
+  if (selectedCards.value.length > 0) {
+    try {
+      // b) 若存在选中卡牌且该卡牌符合当前出牌规则，则自动打出该选中卡牌
+      // 尝试出牌，后端会验证规则
+      playingCard.value = true
+      playError.value = null
+      
+      // 清空甩牌失败相关状态
+      slingshotFailedCards.value = []
+      slingshotFailedForcedCards.value = []
+      isHandlingSlingshotFailure.value = false
+      
+      // 添加选中卡牌的高亮提示
+      centerNotification.value = {
+        show: true,
+        message: '时间到，自动打出选中卡牌'
+      }
+      
+      // 显示提示后再出牌
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      ws.send({ type: 'play_card', cards: selectedCards.value })
+    } catch (error) {
+      playError.value = '自动出牌失败，将使用系统自动出牌'
+      playingCard.value = false
+      
+      // 清空提示
+      setTimeout(() => {
+        centerNotification.value.show = false
+      }, 1500)
+      
+      // 如果出牌失败，触发自动跟牌逻辑
+      triggerAutoFollow()
+    }
+  } else {
+    // c) 若未选中任何卡牌，或选中的卡牌不符合出牌规则，则自动触发原有的跟牌逻辑
+    triggerAutoFollow()
+  }
+}
+
+// 触发系统自动出牌逻辑
+function triggerAutoFollow() {
+  // 显示自动出牌提示
+  centerNotification.value = {
+    show: true,
+    message: '时间到，系统自动出牌'
+  }
+  
+  // 清空之前的选择
+  selectedCardIndicesForPlay.value = []
+  playError.value = null
+  
+  // 发送自动出牌请求
+  try {
+    playingCard.value = true
+    ws.send({ type: 'auto_play' })
+  } catch (error) {
+    playError.value = '自动出牌失败'
+    playingCard.value = false
+  }
+}
+
+// 监听自动出牌的结果，清空提示
+watch(
+  () => game.current_trick,
+  (newTrick, oldTrick) => {
+    // 如果当前回合的出牌数增加了，说明出牌成功
+    if (newTrick && oldTrick && newTrick.length > oldTrick.length) {
+      setTimeout(() => {
+        centerNotification.value.show = false
+      }, 1500)
+    }
+  }
+)
+
+// 监听自动出牌类型的变化，更新提示信息
+watch(
+  () => game.auto_play_type,
+  (playType) => {
+    if (playType && centerNotification.value.show) {
+      // 根据后端返回的play_type显示正确的提示信息
+      centerNotification.value.message = playType === 'selected_cards' 
+        ? '时间到，自动打出选中卡牌'
+        : '时间到，系统自动出牌'
+    }
+  }
+)
 
 // 组件卸载时不需要特殊处理，因为watch会自动清理
 </script>

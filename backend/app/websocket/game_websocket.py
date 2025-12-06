@@ -46,6 +46,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, List[ConnectionInfo]] = {}
         # 存储每个房间的GameState实例
         self.game_states: Dict[str, GameState] = {}
+        # 存储每个房间的倒计时任务
+        self.countdown_tasks: Dict[str, asyncio.Task] = {}
     
     def get_connection_info(self, room_id: str, websocket: WebSocket) -> Optional[ConnectionInfo]:
         """根据websocket获取连接信息"""
@@ -199,6 +201,200 @@ class ConnectionManager:
         """发送个人消息"""
         await websocket.send_text(message)
     
+    async def start_countdown(self, room_id: str):
+        """
+        开始房间的倒计时
+        """
+        print(f"[倒计时] 开始倒计时 - 房间: {room_id}")
+        # 停止现有的倒计时任务
+        await self.stop_countdown(room_id)
+        
+        # 获取游戏状态并重置和启动倒计时
+        if room_id in self.game_states:
+            game_state = self.game_states[room_id]
+            game_state.start_countdown()  # 调用GameState的start_countdown方法激活倒计时
+            print(f"[倒计时] 房间 {room_id} 的倒计时已激活 - 当前时间: {game_state.current_countdown}秒")
+        
+        # 创建新的倒计时任务
+        task = asyncio.create_task(self._countdown_loop(room_id))
+        self.countdown_tasks[room_id] = task
+        print(f"[倒计时] 为房间 {room_id} 创建新的倒计时任务")
+    
+    async def stop_countdown(self, room_id: str):
+        """
+        停止房间的倒计时
+        """
+        if room_id in self.countdown_tasks:
+            task = self.countdown_tasks[room_id]
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                print(f"[倒计时] 房间 {room_id} 的倒计时任务已取消")
+            del self.countdown_tasks[room_id]
+            print(f"[倒计时] 成功停止房间 {room_id} 的倒计时任务")
+        else:
+            print(f"[倒计时] 房间 {room_id} 没有正在运行的倒计时任务")
+    
+    async def _countdown_loop(self, room_id: str):
+        """
+        倒计时循环任务
+        """
+        try:
+            print(f"[倒计时] 启动倒计时循环 - 房间: {room_id}")
+            while True:
+                await asyncio.sleep(1)
+                
+                # 获取游戏状态
+                if room_id not in self.game_states:
+                    print(f"[倒计时] 房间 {room_id} 不存在，退出倒计时循环")
+                    break
+                
+                game_state = self.game_states[room_id]
+                
+                # 只在游戏阶段（playing）和有当前玩家时进行倒计时
+                if game_state.game_phase != "playing" or not game_state.current_player:
+                    print(f"[倒计时] 房间 {room_id} 不满足倒计时条件 - 阶段: {game_state.game_phase}, 当前玩家: {game_state.current_player}")
+                    continue
+                
+                # 获取当前玩家信息
+                current_player = game_state.get_player_by_position(game_state.current_player)
+                player_info = f"ID: {current_player.id}, 名称: {current_player.name}, 位置: {game_state.current_player.value}" if current_player else "未知玩家"
+                
+                # 记录倒计时前的状态
+                print(f"[倒计时] 房间 {room_id} - 当前玩家: {player_info}, 倒计时前: {game_state.current_countdown}秒, 激活状态: {game_state.countdown_active}")
+                
+                # 减少倒计时
+                time_up = game_state.decrease_countdown()
+                
+                # 记录倒计时后的状态
+                print(f"[倒计时] 房间 {room_id} - 当前玩家: {player_info}, 倒计时后: {game_state.current_countdown}秒, 时间到: {time_up}")
+                
+                # 发送倒计时更新
+                print(f"[倒计时] 房间 {room_id} - 广播倒计时更新: {game_state.current_countdown}秒")
+                await self._broadcast_countdown_update(room_id, game_state.current_countdown)
+                
+                # 如果时间到，触发自动出牌
+                if time_up:
+                    print(f"[倒计时] 房间 {room_id} - 倒计时结束，执行自动出牌")
+                    await self._auto_play(room_id)
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"倒计时循环错误 ({room_id}): {e}")
+    
+    async def _broadcast_countdown_update(self, room_id: str, remaining_time: int):
+        """
+        广播倒计时更新给房间内所有玩家
+        """
+        # 获取游戏状态以检查倒计时激活状态
+        if room_id in self.game_states:
+            game_state = self.game_states[room_id]
+            countdown_active = game_state.countdown_active
+        else:
+            countdown_active = True  # 默认值
+        
+        message = {
+            "type": "countdown_updated",
+            "remaining_time": remaining_time,
+            "countdown_active": countdown_active
+        }
+        print(f"[倒计时] 准备广播倒计时更新 - 房间: {room_id}, 剩余时间: {remaining_time}秒, 激活状态: {countdown_active}, 消息内容: {message}")
+        
+        # 使用现有的broadcast_to_room方法发送消息
+        await self.broadcast_to_room(json.dumps(message), room_id)
+        print(f"[倒计时] 成功广播倒计时更新 - 房间: {room_id}, 剩余时间: {remaining_time}秒")
+    
+    async def _auto_play(self, room_id: str):
+        """
+        当倒计时结束时自动出牌
+        """
+        if room_id not in self.game_states:
+            return
+        
+        game_state = self.game_states[room_id]
+        
+        # 调用GameState的auto_play方法
+        result = game_state.auto_play()
+        
+        # 如果自动出牌成功，处理出牌结果
+        if result.get("success", False):
+            # 获取当前玩家
+            player = game_state.get_player_by_id(game_state.current_player_id)
+            if not player:
+                return
+            
+            # 检查是否完成一轮（必须在play_card之后检查，因为play_card会更新状态）
+            # 注意：play_card中如果一轮完成，会保存last_trick但不清空current_trick_with_player（延迟清空）
+            # 所以这里检查：如果current_trick_with_player长度为4，说明刚完成一轮
+            trick_was_complete = len(game_state.current_trick_with_player) == 4
+            
+            # 构建卡牌字符串列表（用于前端显示）
+            cards_str = [str(card) for card in result.get("cards", [])]
+            
+            # 获取当前轮次最大玩家名称
+            current_trick_max_player_name = None
+            if hasattr(game_state, "current_trick_max_player_id") and game_state.current_trick_max_player_id:
+                max_player = game_state.get_player_by_id(game_state.current_trick_max_player_id)
+                if max_player:
+                    current_trick_max_player_name = max_player.name
+            
+            # 构建出牌事件
+            play_event = {
+                "type": "card_played",
+                "player_id": game_state.current_player_id,
+                "player_position": player.position.value,
+                "cards": cards_str,
+                "current_trick": game_state.current_trick_with_player if hasattr(game_state, "current_trick_with_player") else [],
+                "trick_complete": trick_was_complete,
+                "current_player": game_state.current_player.value if game_state.current_player else None,
+                "current_trick_max_player": current_trick_max_player_name
+            }
+            
+            # 广播出牌事件给所有玩家
+            await self.broadcast_to_room(json.dumps(play_event), room_id)
+            
+            # 如果一轮结束，发送获胜者信息和上一轮出牌
+            if trick_was_complete and hasattr(game_state, "last_trick"):
+                # 使用last_trick作为current_trick，因为last_trick是上一轮完成时的数据
+                trick_complete_event = {
+                    "type": "trick_complete",
+                    "last_trick": game_state.last_trick,
+                    "current_trick": game_state.last_trick.copy(),  # 使用last_trick作为current_trick（用于延迟显示）
+                    "tricks_won": game_state.tricks_won,
+                    "idle_score": game_state.idle_score,  # 添加分数信息
+                    "current_player": game_state.current_player.value if game_state.current_player else None
+                }
+                await self.broadcast_to_room(json.dumps(trick_complete_event), room_id)
+                
+                # 发送分数更新事件
+                score_event = {
+                    "type": "score_updated",
+                    "idle_score": game_state.idle_score
+                }
+                await self.broadcast_to_room(json.dumps(score_event), room_id)
+                
+                # 发送完事件后，清空current_trick_with_player（为下一轮准备）
+                game_state.current_trick_with_player = []
+            
+            # 发送状态快照
+            await self.send_snapshot(room_id)
+            
+            # 检查游戏是否结束
+            if game_state.game_phase == "scoring" and game_state.round_summary:
+                round_end_event = {
+                    "type": "round_end",
+                    "round_summary": game_state.round_summary,
+                    "ready_count": len(game_state.players_ready_for_next_round),
+                    "total_players": len(game_state.room.players),
+                    "ready_players": list(game_state.players_ready_for_next_round)
+                }
+                await self.broadcast_to_room(json.dumps(round_end_event), room_id)
+            else:
+                # 重置倒计时，为下一个玩家开始倒计时
+                await self.start_countdown(room_id)
+    
     async def send_to_player(self, message: str, room_id: str, player_id: str):
         """发送消息给特定玩家"""
         if room_id in self.active_connections:
@@ -282,6 +478,8 @@ class ConnectionManager:
             "idle_score": gs.idle_score,
             "tricks_won": gs.tricks_won,
             "my_hand": my_hand,  # 只有自己的手牌
+            "countdown": gs.current_countdown,
+            "countdown_active": gs.countdown_active,
             "players_cards_count": {
                 p.position.value: len(p.cards) for p in gs.room.players
             },
@@ -665,6 +863,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                             await manager.broadcast_to_room(json.dumps(payload), room_id)
                             if gs.game_phase == "playing":
                                 await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": "playing"}), room_id)
+                                # 游戏进入playing阶段时启动倒计时
+                                await manager.start_countdown(room_id)
                             await manager.send_snapshot(room_id)
                         else:
                             await manager.send_personal_message(json.dumps({"type": "error", "message": "扣底失败，请检查所选牌"}), websocket)
@@ -676,7 +876,34 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                     ok = gs.finish_bidding()
                     if ok:
                         await manager.broadcast_to_room(json.dumps({"type": "phase_changed", "phase": gs.game_phase}), room_id)
+                        # 如果进入playing阶段，启动倒计时
+                        if gs.game_phase == "playing":
+                            await manager.start_countdown(room_id)
                     await manager.send_snapshot(room_id)
+            elif msg_type == "select_cards":
+                # 玩家选择卡牌（用于自动出牌功能）
+                gs = manager.get_game_state(room_id)
+                if not gs or not player_id_current:
+                    await manager.send_personal_message(json.dumps({"type": "error", "message": "无法处理选中卡牌"}), websocket)
+                else:
+                    # 检查是否轮到当前玩家出牌
+                    player = gs.get_player_by_id(player_id_current)
+                    if not player:
+                        await manager.send_personal_message(json.dumps({"type": "error", "message": "玩家不存在"}), websocket)
+                    else:
+                        # 解析选中的卡牌
+                        cards_str = message.get("cards") or []
+                        if not isinstance(cards_str, list):
+                            cards_str = [cards_str]
+                        
+                        # 将字符串转换为Card对象
+                        parsed_cards = parse_card_strings(cards_str)
+                        
+                        # 更新GameState中的选中卡牌
+                        gs.selected_cards = parsed_cards
+                        
+                        # 可以选择发送确认消息给前端
+                        await manager.send_personal_message(json.dumps({"type": "cards_selected", "success": True}), websocket)
             elif msg_type == "play_card":
                 # 玩家出牌（支持多张牌）
                 gs = manager.get_game_state(room_id)
@@ -729,6 +956,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                             else:
                                 result = gs.play_card(player_id_current, parsed_cards)
                                 if result.get("success"):
+                                    # 玩家手动出牌成功，停止当前倒计时
+                                    await manager.stop_countdown(room_id)
                                     # 检查是否完成一轮（必须在play_card之后检查，因为play_card会更新状态）
                                     # 注意：play_card中如果一轮完成，会保存last_trick但不清空current_trick_with_player（延迟清空）
                                     # 所以这里检查：如果current_trick_with_player长度为4，说明刚完成一轮
@@ -778,6 +1007,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                         gs.current_trick_with_player = []
                                     
                                     await manager.send_snapshot(room_id)
+                                    
+                                    # 无论是否一轮结束，为下一个玩家启动倒计时
+                                    await manager.start_countdown(room_id)
                                     
                                     # 检查游戏是否结束（所有玩家手牌为空）
                                     # 注意：_handle_game_end会在play_card中调用，所以这里检查phase是否为scoring

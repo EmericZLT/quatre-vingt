@@ -121,6 +121,10 @@ class CardPlayingSystem:
         self.led_cards = cards.copy()
         self.led_card_type = self._get_card_type(cards)
         
+        # 如果牌型无效，直接拒绝领出
+        if self.led_card_type is None:
+            return PlayResult(False, "牌型无效，无法领出")
+        
         # 如果是单张或对子或拖拉机，直接领出
         if self.led_card_type in [CardType.SINGLE, CardType.PAIR, CardType.TRACTOR]:
             self.led_suit = cards[0].suit
@@ -530,8 +534,8 @@ class CardPlayingSystem:
         elif len(cards) == 2:
             if self._is_pair(cards):
                 return CardType.PAIR
-            else:
-                # 两张牌且不是对子，为甩牌
+            elif self._is_slingshot(cards):
+                # 两张牌且不是对子，但同一花色，为甩牌
                 return CardType.SLINGSHOT
         elif len(cards) > 2:
             if self.tractor_logic.is_tractor(cards):
@@ -539,7 +543,8 @@ class CardPlayingSystem:
             elif self._is_slingshot(cards):
                 return CardType.SLINGSHOT
         
-        return CardType.SINGLE
+        # 当多张牌但不满足任何有效牌型时，返回None表示无效牌型
+        return None
     
     def _is_pair(self, cards: List[Card]) -> bool:
         """检查是否为对子"""
