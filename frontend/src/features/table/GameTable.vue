@@ -1484,6 +1484,8 @@ const playError = ref<string | null>(null)
 const slingshotFailedCards = ref<string[]>([])  // 甩牌失败的牌
 const slingshotFailedForcedCards = ref<string[]>([])  // 需要强制打出的牌
 const isHandlingSlingshotFailure = ref(false)  // 是否正在处理甩牌失败
+// 倒计时自动出牌相关状态
+const isWaitingForCountdownPlayValidation = ref(false)  // 是否正在等待倒计时出牌的验证结果
 
 // 中央提示框状态
 const centerNotification = ref<{ show: boolean; message: string }>({
@@ -2261,6 +2263,51 @@ onMounted(() => {
       // 注意：applyTrickComplete已经在ws.ts中更新了current_trick为上一轮完成的牌
       // 不清空current_trick，保留上一轮的牌，等待新一轮第一名玩家出牌时再清空
     } else if (msg.type === 'card_played') {
+      // ⚠️ 关键：在处理任何其他逻辑之前，先检查并处理等待验证的情况
+      // 因为applyCardPlayed已经执行并可能触发了watch，我们需要在这里立即处理
+      const wasWaiting = isWaitingForCountdownPlayValidation.value
+      const hasSelectedCards = selectedCards.value.length > 0
+      
+      // 如果正在等待验证，或者有选中卡牌且play_type是auto_logic（可能是倒计时归零的自动出牌）
+      if ((wasWaiting || (hasSelectedCards && msg.play_type === 'auto_logic' && isMyTurn.value)) && !msg.slingshot_failed) {
+        // 在清空selectedCards之前先保存，用于比较
+        const savedSelectedCards = [...selectedCards.value]
+        
+        // 检查后端返回的卡牌是否和前端选中的卡牌一致
+        const backendCards = msg.cards || []
+        const frontendSelectedCards = savedSelectedCards || []
+        
+        // 比较卡牌是否一致（排序后比较）
+        const backendCardsSorted = [...backendCards].sort().join(',')
+        const frontendCardsSorted = [...frontendSelectedCards].sort().join(',')
+        const cardsMatch = backendCardsSorted === frontendCardsSorted
+        
+        // 如果卡牌不一致，说明系统自动出牌了，应该显示"选中卡牌不符合规则，系统自动出牌"
+        // 即使play_type是'selected_cards'，如果卡牌不一致，说明后端判断有问题，应该纠正提示
+        if (!cardsMatch || msg.play_type === 'auto_logic') {
+          // 卡牌不一致或play_type是auto_logic，说明选中的牌不符合规则
+          centerNotification.value = {
+            show: true,
+            message: '选中卡牌不符合规则，系统自动出牌'
+          }
+        } else if (msg.play_type === 'selected_cards' && cardsMatch) {
+          // 卡牌一致且play_type是selected_cards，说明选中的牌符合规则
+          centerNotification.value = {
+            show: true,
+            message: '时间到，自动打出选中卡牌'
+          }
+        } else {
+          // 其他情况，默认显示系统自动出牌
+          centerNotification.value = {
+            show: true,
+            message: '选中卡牌不符合规则，系统自动出牌'
+          }
+        }
+        
+        // 立即清除等待标志，防止watch再次处理
+        isWaitingForCountdownPlayValidation.value = false
+      }
+      
       // 如果一轮完成（trick_complete为true），不清空current_trick，等待trick_complete事件处理
       if (!msg.trick_complete) {
         // 如果是甩牌失败的情况，不要清空current_trick，让牌显示1.5秒
@@ -2288,13 +2335,17 @@ onMounted(() => {
         currentTrickMaxPlayer.value = msg.current_trick_max_player
       }
       
-      // 出牌后，如果是自己出的牌，清空选择
-      if (msg.player_id === playerId.value) {
-        // 如果不是甩牌失败，才清空选择
-        if (!msg.slingshot_failed) {
-          selectedCardIndicesForPlay.value = []
-          playError.value = null
-          playingCard.value = false
+      // 如果是自己出的牌，清空选择
+      if (msg.player_id === playerId.value && !msg.slingshot_failed) {
+        // 清空选择和错误状态
+        selectedCardIndicesForPlay.value = []
+        playError.value = null
+        playingCard.value = false
+        
+        // 设置auto_play_type（用于其他逻辑，但提示已经更新）
+        // 注意：只有在不在等待验证的情况下才设置，避免触发watch覆盖提示
+        if (msg.play_type && !wasWaiting && game.auto_play_type !== msg.play_type) {
+          game.auto_play_type = msg.play_type
         }
       }
       // GameStore的applyCardPlayed会自动更新current_player，这里不需要额外操作
@@ -2411,67 +2462,41 @@ watch(
 
 // 倒计时归零时的自动出牌处理
 async function handleAutoPlayOnCountdownZero() {
-  // a) 检测当前是否有用户已选中的卡牌
+  console.log('[倒计时] 倒计时归零，开始处理自动出牌')
+  
+  // 清空甩牌失败相关状态
+  slingshotFailedCards.value = []
+  slingshotFailedForcedCards.value = []
+  isHandlingSlingshotFailure.value = false
+  
+  // 检查是否有选中的卡牌
   if (selectedCards.value.length > 0) {
-    try {
-      // b) 若存在选中卡牌且该卡牌符合当前出牌规则，则自动打出该选中卡牌
-      // 尝试出牌，后端会验证规则
-      playingCard.value = true
-      playError.value = null
-      
-      // 清空甩牌失败相关状态
-      slingshotFailedCards.value = []
-      slingshotFailedForcedCards.value = []
-      isHandlingSlingshotFailure.value = false
-      
-      // 添加选中卡牌的高亮提示
-      centerNotification.value = {
-        show: true,
-        message: '时间到，自动打出选中卡牌'
-      }
-      
-      // 显示提示后再出牌
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      ws.send({ type: 'play_card', cards: selectedCards.value })
-    } catch (error) {
-      playError.value = '自动出牌失败，将使用系统自动出牌'
-      playingCard.value = false
-      
-      // 清空提示
-      setTimeout(() => {
-        centerNotification.value.show = false
-      }, 1500)
-      
-      // 如果出牌失败，触发自动跟牌逻辑
-      triggerAutoFollow()
+    console.log('[倒计时] 有选中的卡牌，等待后端验证:', selectedCards.value)
+    
+    // 标记正在等待后端验证选中的卡牌
+    isWaitingForCountdownPlayValidation.value = true
+    
+    // 显示等待提示，等待后端返回结果后再更新为具体提示
+    centerNotification.value = {
+      show: true,
+      message: '时间到，等待系统处理...'
     }
   } else {
-    // c) 若未选中任何卡牌，或选中的卡牌不符合出牌规则，则自动触发原有的跟牌逻辑
-    triggerAutoFollow()
-  }
-}
-
-// 触发系统自动出牌逻辑
-function triggerAutoFollow() {
-  // 显示自动出牌提示
-  centerNotification.value = {
-    show: true,
-    message: '时间到，系统自动出牌'
+    console.log('[倒计时] 没有选中的卡牌，等待系统自动出牌')
+    
+    // 没有选中的卡牌，不需要等待验证
+    isWaitingForCountdownPlayValidation.value = false
+    
+    // 显示系统自动出牌的提示
+    centerNotification.value = {
+      show: true,
+      message: '时间到，系统自动出牌'
+    }
   }
   
-  // 清空之前的选择
-  selectedCardIndicesForPlay.value = []
-  playError.value = null
-  
-  // 发送自动出牌请求
-  try {
-    playingCard.value = true
-    ws.send({ type: 'auto_play' })
-  } catch (error) {
-    playError.value = '自动出牌失败'
-    playingCard.value = false
-  }
+  // 不发送play_card请求，直接等待后端的_auto_play
+  // 后端的game_state.auto_play()会检查selected_cards，如果符合规则就使用，否则使用自动逻辑
+  // 后端返回card_played事件时会包含play_type，前端根据play_type更新提示
 }
 
 // 监听自动出牌的结果，清空提示
@@ -2480,9 +2505,16 @@ watch(
   (newTrick, oldTrick) => {
     // 如果当前回合的出牌数增加了，说明出牌成功
     if (newTrick && oldTrick && newTrick.length > oldTrick.length) {
-      setTimeout(() => {
-        centerNotification.value.show = false
-      }, 1500)
+      // 注意：不要在这里清除isWaitingForCountdownPlayValidation
+      // 让handleWsMessage来处理，因为它需要根据卡牌比较来判断提示
+      // 如果正在等待倒计时验证，handleWsMessage会处理提示更新和标志清除
+      if (!isWaitingForCountdownPlayValidation.value) {
+        // 正常出牌，延迟清空提示
+        setTimeout(() => {
+          centerNotification.value.show = false
+        }, 1500)
+      }
+      // 如果isWaitingForCountdownPlayValidation为true，不在这里处理，让handleWsMessage处理
     }
   }
 )
@@ -2490,12 +2522,38 @@ watch(
 // 监听自动出牌类型的变化，更新提示信息
 watch(
   () => game.auto_play_type,
-  (playType) => {
-    if (playType && centerNotification.value.show) {
-      // 根据后端返回的play_type显示正确的提示信息
-      centerNotification.value.message = playType === 'selected_cards' 
-        ? '时间到，自动打出选中卡牌'
-        : '时间到，系统自动出牌'
+  (playType, oldPlayType) => {
+    if (playType) {
+      // 在watch开始时立即保存isWaitingForCountdownPlayValidation的值
+      // 这样即使在其他地方被修改，我们也能使用正确的值
+      const wasWaitingForValidation = isWaitingForCountdownPlayValidation.value
+      console.log('[倒计时] watch收到auto_play_type:', playType, '旧值:', oldPlayType, '等待验证标志:', wasWaitingForValidation)
+      
+      // 如果正在等待倒计时验证，完全跳过watch的处理
+      // 让handleWsMessage来处理所有逻辑，因为它能看到完整的消息内容（包括cards）
+      if (wasWaitingForValidation) {
+        console.log('[倒计时] watch: ⚠️ 正在等待验证，完全跳过，不更新提示，让handleWsMessage处理')
+        return // 完全不处理，让handleWsMessage来处理
+      }
+      
+      // 不在等待验证的情况，正常处理（这种情况是倒计时归零时没有选中卡牌）
+      // 如果是系统自动出牌（auto_logic），清空选中的卡牌
+      if (playType === 'auto_logic') {
+        selectedCardIndicesForPlay.value = []
+        console.log('[倒计时] watch: 正常的系统自动出牌（没有选中卡牌）')
+        centerNotification.value = {
+          show: true,
+          message: '时间到，系统自动出牌'
+        }
+      } else if (playType === 'selected_cards') {
+        // selected_cards 类型，选中的牌成功打出
+        // 这种情况不应该出现在等待验证的场景中，但如果出现了，说明后端判断有问题
+        console.log('[倒计时] watch: selected_cards类型，但不在等待验证状态')
+        centerNotification.value = {
+          show: true,
+          message: '时间到，自动打出选中卡牌'
+        }
+      }
     }
   }
 )

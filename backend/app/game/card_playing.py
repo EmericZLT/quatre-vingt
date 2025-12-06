@@ -11,6 +11,7 @@ from app.game.tractor_logic import TractorLogic
 from app.game.trump_logic import TrumpLogic
 from app.game.slingshot_logic import SlingshotLogic, SlingshotResult
 from app.game.card_sorter import CardSorter
+from app.game.trump_helper import TrumpHelper
 
 
 class CardType(str, Enum):
@@ -54,6 +55,7 @@ class CardPlayingSystem:
         self.tractor_logic = TractorLogic(card_system.current_level, card_system, trump_suit)
         self.trump_logic = TrumpLogic(self.card_comparison, self.tractor_logic)
         self.slingshot_logic = SlingshotLogic(card_system, trump_suit)
+        self.trump_helper = TrumpHelper(card_system, trump_suit)
     
     def set_player_hands(self, hands: Dict[PlayerPosition, List[Card]]):
         """
@@ -127,8 +129,8 @@ class CardPlayingSystem:
         
         # 如果是单张或对子或拖拉机，直接领出
         if self.led_card_type in [CardType.SINGLE, CardType.PAIR, CardType.TRACTOR]:
-            # 使用_get_card_suit来正确识别牌的花色类型（包括级牌为主牌）
-            self.led_suit = self._get_card_suit(cards[0])
+            # 使用trump_helper来正确识别牌的花色类型（包括级牌为主牌）
+            self.led_suit = self.trump_helper.get_card_suit(cards[0])
             self.current_trick.append((player, cards))
             return PlayResult(True, "领出成功")
         
@@ -139,7 +141,7 @@ class CardPlayingSystem:
         
         # 检查其他玩家能否管上甩牌
         if self.all_players_hands:
-            slingshot_suit = self.slingshot_logic._get_card_suit(cards[0])
+            slingshot_suit = self.trump_helper.get_card_suit(cards[0])
             all_challenge_cards = []  # 每个元素是一个玩家的挑战牌列表
             
             for other_player, other_hand in self.all_players_hands.items():
@@ -164,7 +166,7 @@ class CardPlayingSystem:
                 )
         
         # 甩牌成功，记录花色类型
-        self.led_suit = self.slingshot_logic._get_card_suit(cards[0])
+        self.led_suit = self.trump_helper.get_card_suit(cards[0])
         self.current_trick.append((player, cards))
         
         return PlayResult(True, f"甩牌成功: {', '.join(slingshot_result.card_types)}")
@@ -213,18 +215,18 @@ class CardPlayingSystem:
             return self._check_slingshot_follow(cards, player_hand)
         
         # 3. 检查是否有该花色的牌
-        led_suit_str = self.slingshot_logic._get_card_suit(self.led_cards[0])
-        same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        led_suit_str = self.trump_helper.get_card_suit(self.led_cards[0])
+        same_suit_cards = self.trump_helper.filter_by_suit(player_hand, led_suit_str)
         
         # 4. 检查出的牌是否符合花色要求
         if same_suit_cards:
             # 有该花色，检查出的牌中该花色的数量
-            same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+            same_suit_in_cards = self.trump_helper.filter_by_suit(cards, led_suit_str)
             # 如果出的该花色牌数量少于手牌中该花色的数量，说明没有出完该花色
             if len(same_suit_in_cards) < len(same_suit_cards):
                 # 检查是否有该花色的牌没有出
                 for card in cards:
-                    if self.slingshot_logic._get_card_suit(card) != led_suit_str:
+                    if self.trump_helper.get_card_suit(card) != led_suit_str:
                         return PlayResult(False, "有该花色必须出该花色")
         
         # 5. 检查牌型匹配
@@ -247,7 +249,7 @@ class CardPlayingSystem:
         # 检查是否出了对子
         if not self._is_pair(cards):
             # 检查手中是否有该花色的对子
-            same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+            same_suit_cards = self.trump_helper.filter_by_suit(player_hand, led_suit_str)
             
             # 检查是否有真正的对子（必须相同rank和相同suit）
             # 使用 (rank, suit) 作为key，因为不同花色的级牌不是对子
@@ -278,8 +280,8 @@ class CardPlayingSystem:
             led_suit_str: 领出的花色类型
         """
         # 获取该花色的牌（led_suit_str可能是主牌"trump"或副牌花色）
-        same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
-        same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        same_suit_cards = self.trump_helper.filter_by_suit(player_hand, led_suit_str)
+        same_suit_in_cards = self.trump_helper.filter_by_suit(cards, led_suit_str)
         
         # 检查是否出了拖拉机
         is_tractor = self.tractor_logic.is_tractor(cards)
@@ -386,24 +388,24 @@ class CardPlayingSystem:
             return PlayResult(False, f"甩牌跟牌数量不对：需要{len(self.led_cards)}张")
         
         # 获取甩牌的花色类型
-        led_suit_str = self.slingshot_logic._get_card_suit(self.led_cards[0])
+        led_suit_str = self.trump_helper.get_card_suit(self.led_cards[0])
         
         # 获取同花色的牌（出牌前的手牌）
-        same_suit_cards = [c for c in player_hand if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        same_suit_cards = self.trump_helper.filter_by_suit(player_hand, led_suit_str)
         # 获取跟的牌中该花色的牌
-        same_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+        same_suit_in_cards = self.trump_helper.filter_by_suit(cards, led_suit_str)
         
         # 检查跟的牌是否符合要求
         if same_suit_cards:
             # 如果出的该花色牌数量少于手牌中该花色的数量，说明还有该花色的牌没有出
             if len(same_suit_in_cards) < len(same_suit_cards):
                 # 检查是否出了其他花色的牌（不允许）
-                other_suit_in_cards = [c for c in cards if self.slingshot_logic._get_card_suit(c) != led_suit_str]
+                other_suit_in_cards = [c for c in cards if self.trump_helper.get_card_suit(c) != led_suit_str]
                 if other_suit_in_cards:
                     return PlayResult(False, "有该花色必须出该花色")
                 
                 # 分析领出方和跟出方的牌型
-                led_same_suit_cards = [c for c in self.led_cards if self.slingshot_logic._get_card_suit(c) == led_suit_str]
+                led_same_suit_cards = self.trump_helper.filter_by_suit(self.led_cards, led_suit_str)
                 led_analysis = self.slingshot_logic._analyze_card_types(led_same_suit_cards)
                 follow_analysis = self.slingshot_logic._analyze_card_types(same_suit_in_cards)
                 
@@ -561,9 +563,8 @@ class CardPlayingSystem:
         if len(cards) < 2:
             return False
         
-        # 检查是否为同一花色类型（使用_get_card_suit来正确处理级牌）
-        first_suit = self._get_card_suit(cards[0])
-        return all(self._get_card_suit(card) == first_suit for card in cards)
+        # 检查是否为同一花色类型（使用trump_helper来正确处理级牌）
+        return self.trump_helper.are_all_same_suit(cards)
     
     def _determine_trick_winner(self) -> PlayerPosition:
         """
@@ -696,13 +697,13 @@ class CardPlayingSystem:
             return False
         
         # 获取领出的花色类型
-        led_suit_str = self.slingshot_logic._get_card_suit(self.led_cards[0])
+        led_suit_str = self.trump_helper.get_card_suit(self.led_cards[0])
         
         # 分类：主牌和副牌
-        cards1_all_led_suit = all(self.slingshot_logic._get_card_suit(c) == led_suit_str for c in cards1)
-        cards2_all_led_suit = all(self.slingshot_logic._get_card_suit(c) == led_suit_str for c in cards2)
-        cards1_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards1)
-        cards2_all_trump = all(self.slingshot_logic._get_card_suit(c) == "trump" for c in cards2)
+        cards1_all_led_suit = all(self.trump_helper.get_card_suit(c) == led_suit_str for c in cards1)
+        cards2_all_led_suit = all(self.trump_helper.get_card_suit(c) == led_suit_str for c in cards2)
+        cards1_all_trump = all(self.trump_helper.get_card_suit(c) == "trump" for c in cards1)
+        cards2_all_trump = all(self.trump_helper.get_card_suit(c) == "trump" for c in cards2)
         
         # 将吃逻辑处理
         # 1. 如果本轮最大牌（cards2）全是主牌，而当前玩家出的牌（cards1）不全是主牌，那么cards1一定不会更大
@@ -997,42 +998,8 @@ class CardPlayingSystem:
     
     def _is_trump_card(self, card: Card) -> bool:
         """检查是否为主牌"""
-        # 大小王是主牌
-        if card.is_joker:
-            return True
-        
-        # 级牌是主牌
-        if card.rank == self.card_comparison._get_level_rank():
-            return True
-        
-        # 主牌花色的牌是主牌
-        if self.trump_suit and card.suit == self.trump_suit:
-            return True
-        
-        return False
-    
-    def _get_card_suit(self, card: Card) -> Optional[str]:
-        """
-        获取牌的花色类型
-        
-        Returns:
-            "trump": 主牌（包括大小王、级牌、主牌花色）
-            具体花色值: 副牌花色
-        """
-        # 大小王
-        if card.rank in [Rank.SMALL_JOKER, Rank.BIG_JOKER]:
-            return "trump"
-        
-        # 级牌（使用 CardSystem 的方法判断）
-        if card.rank == self.card_comparison._get_level_rank():
-            return "trump"
-        
-        # 主牌花色
-        if self.trump_suit and card.suit == self.trump_suit:
-            return "trump"
-        
-        # 副牌
-        return card.suit.value if card.suit else None
+        # 使用trump_helper判断（保留此方法用于向后兼容）
+        return self.trump_helper.is_trump(card)
     
     def _reset_trick(self):
         """重置当前圈"""

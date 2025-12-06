@@ -88,20 +88,10 @@ export const useWsStore = defineStore('ws', {
           game.applyTrickComplete(msg)
           break
         case 'countdown_updated':
-          // 添加日志记录收到的倒计时更新
-          console.log('[前端调试] 收到倒计时更新消息:', msg)
-          console.log('[前端调试] 转换后的数据:', {
-            countdown: msg.remaining_time,
-            countdown_active: msg.countdown_active || false
-          })
           // 转换后端字段名，使用消息中的countdown_active值
           game.applyCountdownUpdated({
             countdown: msg.remaining_time,
             countdown_active: msg.countdown_active || false
-          })
-          console.log('[前端调试] 更新后gameStore状态:', {
-            countdown: game.countdown,
-            countdownActive: game.countdownActive
           })
           break
         case 'error':

@@ -340,7 +340,7 @@ class ConnectionManager:
                 if max_player:
                     current_trick_max_player_name = max_player.name
             
-            # 构建出牌事件
+            # 构建出牌事件（包含play_type用于前端显示提示）
             play_event = {
                 "type": "card_played",
                 "player_id": game_state.current_player_id,
@@ -349,7 +349,8 @@ class ConnectionManager:
                 "current_trick": game_state.current_trick_with_player if hasattr(game_state, "current_trick_with_player") else [],
                 "trick_complete": trick_was_complete,
                 "current_player": game_state.current_player.value if game_state.current_player else None,
-                "current_trick_max_player": current_trick_max_player_name
+                "current_trick_max_player": current_trick_max_player_name,
+                "play_type": result.get("play_type")  # 添加play_type字段
             }
             
             # 广播出牌事件给所有玩家
@@ -1081,6 +1082,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                 await manager.handle_deal_tick(room_id)
                                 await asyncio.sleep(0.1)
                     asyncio.create_task(auto_deal_task())
+            elif msg_type == "auto_play":
+                # 前端请求自动出牌（倒计时结束时触发）
+                # 注意：实际的自动出牌逻辑由后端倒计时系统自动触发
+                # 这里只是为了避免显示"Unknown message type"错误
+                # 前端发送此消息主要是为了触发倒计时结束的处理
+                # 但后端已经通过倒计时系统自动处理了，所以这里不需要额外操作
+                pass
             elif msg_type == "ready_for_next_round":
                 # 玩家准备进入下一轮
                 gs = manager.get_game_state(room_id)

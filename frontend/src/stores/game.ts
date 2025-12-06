@@ -194,7 +194,7 @@ export const useGameStore = defineStore('game', {
       if (e.winner === 'NORTH' || e.winner === 'SOUTH') this.tricks_won.north_south += 1
       else this.tricks_won.east_west += 1
     },
-    applyCardPlayed(e: { current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string; slingshot_failed?: boolean }>; trick_complete?: boolean; current_player?: string; slingshot_failed?: boolean }) {
+    applyCardPlayed(e: { current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string; slingshot_failed?: boolean }>; trick_complete?: boolean; current_player?: string; slingshot_failed?: boolean; play_type?: 'selected_cards' | 'auto_logic' }) {
       // 如果一轮完成（trick_complete为true），保留current_trick，不清空，等待新一轮开始
       if (e.trick_complete) {
         // 一轮完成，保留current_trick中的4张牌，不清空
@@ -242,6 +242,11 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof e.current_player === 'string') {
         this.current_player = e.current_player
+      }
+      // 设置自动出牌类型（如果存在）
+      if (e.play_type === 'selected_cards' || e.play_type === 'auto_logic') {
+        console.log('[GameStore] applyCardPlayed: 设置auto_play_type为', e.play_type)
+        this.auto_play_type = e.play_type
       }
     },
     applyTrickComplete(e: { last_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; current_trick?: Array<{ player_id: string; player_position: string; cards?: string[]; card?: string }>; tricks_won?: { north_south: number; east_west: number }; current_player?: string; idle_score?: number }) {
@@ -376,7 +381,11 @@ export const useGameStore = defineStore('game', {
       console.log('[GameStore] applyAutoPlay:', e)
       
       // 保存自动出牌类型
-      this.auto_play_type = e.play_type;
+      if (e.play_type === 'selected_cards' || e.play_type === 'auto_logic') {
+        this.auto_play_type = e.play_type
+      } else {
+        this.auto_play_type = null
+      }
       
       // 如果有current_trick，更新当前轮次的牌
       if (Array.isArray(e.current_trick)) {

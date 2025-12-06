@@ -804,6 +804,8 @@ class GameState:
                 if result.get("success", False):
                     result['played_cards'] = [card]
                     result['play_type'] = "auto_logic"
+                    # 系统自动出牌成功后，清空选中的卡牌（避免下一轮误用）
+                    self.selected_cards = None
                     return result
         else:
             # 跟牌情况：找到第一个符合规则的出牌组合
@@ -826,6 +828,8 @@ class GameState:
                     if result.get("success", False):
                         result['played_cards'] = combo_list
                         result['play_type'] = "auto_logic"
+                        # 系统自动出牌成功后，清空选中的卡牌（避免下一轮误用）
+                        self.selected_cards = None
                         return result
         
         # 如果没有找到可以出的牌，返回失败

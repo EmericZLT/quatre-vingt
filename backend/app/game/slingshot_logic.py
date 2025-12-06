@@ -24,6 +24,7 @@ from app.models.game import Card, Suit, Rank, PlayerPosition
 from app.game.card_system import CardSystem
 from app.game.card_comparison import CardComparison
 from app.game.tractor_logic import TractorLogic
+from app.game.trump_helper import TrumpHelper
 
 
 class SlingshotResult:
@@ -42,6 +43,7 @@ class SlingshotLogic:
         self.trump_suit = trump_suit
         self.comparison = CardComparison(card_system, trump_suit)
         self.tractor_logic = TractorLogic(card_system.current_level, card_system, trump_suit)
+        self.trump_helper = TrumpHelper(card_system, trump_suit)
     
     def validate_slingshot(self, cards: List[Card], player_hand: List[Card]) -> SlingshotResult:
         """
@@ -63,7 +65,7 @@ class SlingshotLogic:
             return SlingshotResult(False, "Cards not in player's hand")
         
         # 3. 检查是否同一花色（或都是主牌）
-        if not self._is_same_suit(cards):
+        if not self.trump_helper.are_all_same_suit(cards):
             return SlingshotResult(False, "All cards must be of the same suit")
         
         # 4. 分析牌型组合
@@ -88,36 +90,6 @@ class SlingshotLogic:
         """获取牌的唯一标识"""
         return f"{card.suit}_{card.rank}"
     
-    def _is_same_suit(self, cards: List[Card]) -> bool:
-        """检查是否同一花色（或都是主牌）"""
-        if not cards:
-            return True
-        
-        first_suit = self._get_card_suit(cards[0])
-        return all(self._get_card_suit(c) == first_suit for c in cards)
-    
-    def _get_card_suit(self, card: Card) -> Optional[str]:
-        """
-        获取牌的花色类型
-        
-        Returns:
-            "trump": 主牌
-            具体花色: 副牌花色
-        """
-        # 大小王
-        if card.rank in [Rank.SMALL_JOKER, Rank.BIG_JOKER]:
-            return "trump"
-        
-        # 级牌（使用 CardSystem 的方法判断）
-        if card.rank == self.card_system.get_level_rank():
-            return "trump"
-        
-        # 主牌花色
-        if self.trump_suit and card.suit == self.trump_suit:
-            return "trump"
-        
-        # 副牌
-        return card.suit.value
     
     def _are_biggest_in_suit(self, cards: List[Card], remaining_hand: List[Card], suit: str) -> bool:
         """
@@ -129,7 +101,7 @@ class SlingshotLogic:
             suit: 花色类型
         """
         # 获取剩余手牌中同花色的牌
-        same_suit_cards = [c for c in remaining_hand if self._get_card_suit(c) == suit]
+        same_suit_cards = self.trump_helper.filter_by_suit(remaining_hand, suit)
         
         # 如果没有剩余同花色的牌，说明甩的牌都是最大的
         if not same_suit_cards:
@@ -217,7 +189,7 @@ class SlingshotLogic:
             (能否管上, 管上的牌)
         """
         # 检查是否有同花色的牌
-        same_suit_cards = [c for c in challenger_hand if self._get_card_suit(c) == slingshot_suit]
+        same_suit_cards = self.trump_helper.filter_by_suit(challenger_hand, slingshot_suit)
         
         if not same_suit_cards:
             return False, []
@@ -328,7 +300,7 @@ class SlingshotLogic:
         # 按花色分组（因为拖拉机必须同一花色）
         suit_groups = defaultdict(list)
         for card in cards:
-            suit = self._get_card_suit(card)
+            suit = self.trump_helper.get_card_suit(card)
             suit_groups[suit].append(card)
         
         # 标记已使用的牌（使用列表，因为Card对象不可哈希）
@@ -517,7 +489,7 @@ class SlingshotLogic:
         required_count = len(slingshot_cards)
         
         # 1. 获取同花色的牌
-        same_suit_cards = [c for c in follower_hand if self._get_card_suit(c) == slingshot_suit]
+        same_suit_cards = self.trump_helper.filter_by_suit(follower_hand, slingshot_suit)
         
         # 2. 如果同花色的牌数量 >= 甩牌数量，必须出同花色
         if len(same_suit_cards) >= required_count:
@@ -534,7 +506,7 @@ class SlingshotLogic:
         
         # 按优先级排序：副牌 > 主牌，小牌 > 大牌
         def card_priority(card: Card) -> Tuple[int, int]:
-            is_trump = 1 if self._get_card_suit(card) == "trump" else 0
+            is_trump = 1 if self.trump_helper.get_card_suit(card) == "trump" else 0
             rank_value = self.comparison._get_card_value(card)
             return (is_trump, rank_value)
         

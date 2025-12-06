@@ -4,6 +4,7 @@
 from typing import List, Optional
 from app.models.game import Card, Suit, Rank, PlayerPosition
 from app.game.card_system import CardSystem
+from app.game.trump_helper import TrumpHelper
 
 
 class CardComparison:
@@ -12,6 +13,7 @@ class CardComparison:
     def __init__(self, card_system: CardSystem, trump_suit: Optional[Suit] = None):
         self.card_system = card_system
         self.trump_suit = trump_suit
+        self.trump_helper = TrumpHelper(card_system, trump_suit)
     
     @property
     def current_level(self) -> int:
@@ -64,20 +66,8 @@ class CardComparison:
         return self._get_side_value(card)
     
     def _is_trump_card(self, card: Card) -> bool:
-        """检查是否为主牌"""
-        # 大小王是主牌
-        if card.is_joker:
-            return True
-        
-        # 级牌是主牌
-        if card.rank == self._get_level_rank():
-            return True
-        
-        # 主牌花色的牌是主牌
-        if self.trump_suit and card.suit == self.trump_suit:
-            return True
-        
-        return False
+        """检查是否为主牌（使用TrumpHelper）"""
+        return self.trump_helper.is_trump(card)
     
     def _get_trump_value(self, card: Card) -> int:
         """获取主牌的大小值"""

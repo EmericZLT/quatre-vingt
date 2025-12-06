@@ -4,6 +4,8 @@
 """
 from typing import List, Optional
 from app.models.game import Card, Suit, Rank
+from app.game.card_system import CardSystem
+from app.game.trump_helper import TrumpHelper
 
 
 class CardSorter:
@@ -20,6 +22,10 @@ class CardSorter:
         self.current_level = current_level
         self.trump_suit = trump_suit
         self.level_rank = self._get_level_rank()
+        # 创建CardSystem和TrumpHelper用于主副牌判断
+        self.card_system = CardSystem()
+        self.card_system.current_level = current_level
+        self.trump_helper = TrumpHelper(self.card_system, trump_suit)
     
     def _get_level_rank(self) -> Rank:
         """获取当前级别的牌面"""
@@ -37,18 +43,12 @@ class CardSorter:
         return card.rank == self.level_rank
     
     def is_trump_card(self, card: Card) -> bool:
-        """判断是否为主牌（级牌和主牌花色的牌）"""
-        if card.is_joker:
-            return True  # 王牌也是主牌
-        if self.is_level_card(card):
-            return True  # 级牌是主牌
-        if self.trump_suit and card.suit == self.trump_suit:
-            return True  # 主牌花色的牌
-        return False
+        """判断是否为主牌（使用TrumpHelper）"""
+        return self.trump_helper.is_trump(card)
     
     def is_plain_suit_card(self, card: Card) -> bool:
         """判断是否为副牌（非主牌）"""
-        return not self.is_trump_card(card)
+        return not self.trump_helper.is_trump(card)
     
     def sort_cards(self, cards: List[Card]) -> List[Card]:
         """
