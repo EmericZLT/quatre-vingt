@@ -38,7 +38,7 @@ class CardPlayingSystem:
         self.trump_suit = trump_suit
         self.current_trick: List[Tuple[PlayerPosition, List[Card]]] = []
         self.trick_leader: Optional[PlayerPosition] = None
-        self.led_suit: Optional[Suit] = None
+        self.led_suit: Optional[str] = None  # 领出的花色类型："trump" 或具体花色值
         self.led_card_type: Optional[CardType] = None
         self.led_cards: List[Card] = []  # 领出的牌
         self.all_players_hands: Dict[PlayerPosition, List[Card]] = {}  # 所有玩家的手牌
@@ -127,7 +127,8 @@ class CardPlayingSystem:
         
         # 如果是单张或对子或拖拉机，直接领出
         if self.led_card_type in [CardType.SINGLE, CardType.PAIR, CardType.TRACTOR]:
-            self.led_suit = cards[0].suit
+            # 使用_get_card_suit来正确识别牌的花色类型（包括级牌为主牌）
+            self.led_suit = self._get_card_suit(cards[0])
             self.current_trick.append((player, cards))
             return PlayResult(True, "领出成功")
         
@@ -560,9 +561,9 @@ class CardPlayingSystem:
         if len(cards) < 2:
             return False
         
-        # 检查是否为同一花色
-        first_suit = cards[0].suit
-        return all(card.suit == first_suit for card in cards)
+        # 检查是否为同一花色类型（使用_get_card_suit来正确处理级牌）
+        first_suit = self._get_card_suit(cards[0])
+        return all(self._get_card_suit(card) == first_suit for card in cards)
     
     def _determine_trick_winner(self) -> PlayerPosition:
         """
@@ -1010,6 +1011,29 @@ class CardPlayingSystem:
         
         return False
     
+    def _get_card_suit(self, card: Card) -> Optional[str]:
+        """
+        获取牌的花色类型
+        
+        Returns:
+            "trump": 主牌（包括大小王、级牌、主牌花色）
+            具体花色值: 副牌花色
+        """
+        # 大小王
+        if card.rank in [Rank.SMALL_JOKER, Rank.BIG_JOKER]:
+            return "trump"
+        
+        # 级牌（使用 CardSystem 的方法判断）
+        if card.rank == self.card_comparison._get_level_rank():
+            return "trump"
+        
+        # 主牌花色
+        if self.trump_suit and card.suit == self.trump_suit:
+            return "trump"
+        
+        # 副牌
+        return card.suit.value if card.suit else None
+    
     def _reset_trick(self):
         """重置当前圈"""
         self.current_trick = []
@@ -1026,7 +1050,7 @@ class CardPlayingSystem:
         """获取当前圈状态"""
         return {
             "trick_leader": self.trick_leader.value if self.trick_leader else None,
-            "led_suit": self.led_suit if isinstance(self.led_suit, str) else (self.led_suit.value if self.led_suit else None),
+            "led_suit": self.led_suit,  # 已经是字符串类型（"trump" 或花色值）
             "led_card_type": self.led_card_type.value if self.led_card_type else None,
             "led_cards": [str(c) for c in self.led_cards],
             "current_trick": [

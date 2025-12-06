@@ -92,6 +92,7 @@ class GameRoom(BaseModel):
     trump_suit: Optional[Suit] = None
     created_at: datetime = datetime.now()
     owner_id: Optional[str] = None
+    play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒（中等）
     
     @property
     def is_full(self) -> bool:

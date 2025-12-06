@@ -4,6 +4,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import random
+import asyncio
 from app.models.game import GameRoom, Player, PlayerPosition, GameStatus, Suit, Card, Rank
 from app.game.card_system import CardSystem
 from app.game.bidding_system import BiddingSystem
@@ -28,8 +29,8 @@ class GameState:
         self.current_trick_with_player: List[Dict[str, Any]] = []  # 存储 {player_id, player_position, card}
         self.last_trick: List[Dict[str, Any]] = []  # 上一轮出牌信息
         self.trick_leader: Optional[PlayerPosition] = None
-        # 倒计时相关属性
-        self.max_play_time: int = 24  # 最大出牌时间（秒）
+        # 倒计时相关属性（从房间配置中读取）
+        self.max_play_time: int = room.play_time_limit  # 最大出牌时间（秒），从房间配置读取
         self.current_countdown: int = self.max_play_time  # 当前倒计时剩余时间
         self.countdown_active: bool = False  # 倒计时是否处于激活状态
         self.countdown_task: Optional[asyncio.Task] = None  # 倒计时任务引用
@@ -791,9 +792,14 @@ class GameState:
             # 选中的卡牌不符合规则或出牌失败，重置选中卡牌
             self.selected_cards = None
         
+        # 创建打乱顺序的手牌列表，随机选择牌（对超时玩家更公平）
+        import random
+        shuffled_cards = current_player.cards.copy()
+        random.shuffle(shuffled_cards)
+        
         if is_leading:
-            # 领出情况：直接出第一张符合规则的单张牌
-            for card in current_player.cards:
+            # 领出情况：从打乱后的列表中直接出第一张符合规则的单张牌
+            for card in shuffled_cards:
                 result = self.play_card(current_player.id, [card])
                 if result.get("success", False):
                     result['played_cards'] = [card]
@@ -803,9 +809,9 @@ class GameState:
             # 跟牌情况：找到第一个符合规则的出牌组合
             led_card_count = len(self.card_playing_system.led_cards)
             
-            # 生成所有可能的相同数量的组合
+            # 使用打乱后的手牌列表生成所有可能的相同数量的组合
             from itertools import combinations
-            all_combinations = list(combinations(current_player.cards, led_card_count))
+            all_combinations = list(combinations(shuffled_cards, led_card_count))
             
             # 遍历所有组合，找到第一个符合规则的组合
             for combo in all_combinations:

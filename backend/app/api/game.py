@@ -11,6 +11,7 @@ router = APIRouter()
 
 class CreateRoomRequest(BaseModel):
     name: str
+    play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒
 
 class JoinRoomRequest(BaseModel):
     player_name: str
@@ -36,8 +37,13 @@ async def create_room(request: CreateRoomRequest) -> GameRoom:
     if len(room_name) > 15:
         raise HTTPException(status_code=400, detail="房间名不能超过15个字符")
     
+    # 验证出牌时间限制
+    play_time_limit = request.play_time_limit
+    if play_time_limit not in [10, 18, 25]:
+        raise HTTPException(status_code=400, detail="出牌时间限制必须为10、18或25秒")
+    
     room_id = str(uuid.uuid4())
-    room = GameRoom(id=room_id, name=room_name)
+    room = GameRoom(id=room_id, name=room_name, play_time_limit=play_time_limit)
     rooms[room_id] = room
     return room
 

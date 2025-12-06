@@ -6,32 +6,78 @@
       <!-- 创建房间区域 -->
       <div class="bg-slate-800 rounded-lg p-6 mb-6">
         <h2 class="text-xl font-semibold text-white mb-4">创建新房间</h2>
-        <div class="flex gap-4">
-          <input
-            v-model="newRoomName"
-            type="text"
-            placeholder="输入房间名称"
-            data-input-type="newRoomName"
-            maxlength="15"
-            class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
-            @keyup.enter="createRoom"
-          />
-          <input
-            v-model="playerName"
-            type="text"
-            placeholder="输入你的名字"
-            data-input-type="playerName"
-            maxlength="8"
-            class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
-            @keyup.enter="createRoom"
-          />
-          <button
-            @click="createRoom"
-            :disabled="!newRoomName || !playerName || creating"
-            class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-600 disabled:cursor-not-allowed"
-          >
-            {{ creating ? '创建中...' : '创建房间' }}
-          </button>
+        <div class="space-y-4">
+          <!-- 房间名和玩家名输入 -->
+          <div class="flex gap-4">
+            <input
+              v-model="newRoomName"
+              type="text"
+              placeholder="输入房间名称"
+              data-input-type="newRoomName"
+              maxlength="15"
+              class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
+              @keyup.enter="createRoom"
+            />
+            <input
+              v-model="playerName"
+              type="text"
+              placeholder="输入你的名字"
+              data-input-type="playerName"
+              maxlength="8"
+              class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
+              @keyup.enter="createRoom"
+            />
+          </div>
+          
+          <!-- 房间选项 -->
+          <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
+              <label class="text-slate-300 text-sm">出牌等待时间：</label>
+              <div class="flex gap-2">
+                <button
+                  @click="playTimeLimit = 10"
+                  :class="[
+                    'px-4 py-2 rounded text-sm transition-colors',
+                    playTimeLimit === 10
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  ]"
+                >
+                  短 (10秒)
+                </button>
+                <button
+                  @click="playTimeLimit = 18"
+                  :class="[
+                    'px-4 py-2 rounded text-sm transition-colors',
+                    playTimeLimit === 18
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  ]"
+                >
+                  中 (18秒)
+                </button>
+                <button
+                  @click="playTimeLimit = 25"
+                  :class="[
+                    'px-4 py-2 rounded text-sm transition-colors',
+                    playTimeLimit === 25
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  ]"
+                >
+                  长 (25秒)
+                </button>
+              </div>
+            </div>
+            
+            <button
+              @click="createRoom"
+              :disabled="!newRoomName || !playerName || creating"
+              class="ml-auto px-6 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-600 disabled:cursor-not-allowed"
+            >
+              {{ creating ? '创建中...' : '创建房间' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -74,6 +120,9 @@
                 <div class="text-sm text-slate-300">
                   玩家: {{ room.players.length }} / 4
                   <span v-if="room.is_full" class="ml-2 text-red-400">(已满)</span>
+                  <span class="ml-3 text-blue-400">
+                    ⏱ {{ getPlayTimeLimitLabel(room.play_time_limit) }}
+                  </span>
                 </div>
                 <div class="text-xs text-slate-400 mt-1">
                   玩家: {{ room.players.map((p: any) => p.name).join(', ') || '暂无' }}
@@ -119,6 +168,7 @@ const roomStore = useRoomStore()
 
 const newRoomName = ref('')
 const playerName = ref('')
+const playTimeLimit = ref(18)  // 默认18秒（中等）
 const creating = ref(false)
 const loading = ref(true)
 const joinPlayerNames = ref<Record<string, string>>({})
@@ -260,7 +310,10 @@ async function createRoom() {
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: roomName })
+      body: JSON.stringify({ 
+        name: roomName,
+        play_time_limit: playTimeLimit.value
+      })
     })
     
     console.log('响应状态:', response.status, response.statusText)
@@ -345,6 +398,16 @@ function isAnyInputFocused(): boolean {
 function smartRefresh() {
   if (!isAnyInputFocused()) {
     loadRooms()
+  }
+}
+
+// 获取出牌时间限制的显示标签
+function getPlayTimeLimitLabel(timeLimit: number): string {
+  switch(timeLimit) {
+    case 10: return '短 (10秒)'
+    case 18: return '中 (18秒)'
+    case 25: return '长 (25秒)'
+    default: return `${timeLimit}秒`
   }
 }
 
