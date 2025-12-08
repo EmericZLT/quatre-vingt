@@ -203,7 +203,7 @@ class ConnectionManager:
     
     async def start_countdown(self, room_id: str):
         """
-        开始房间的倒计时
+        开始房间的倒计时（如果 max_play_time 为 0，则不启动倒计时）
         """
         print(f"[倒计时] 开始倒计时 - 房间: {room_id}")
         # 停止现有的倒计时任务
@@ -212,8 +212,15 @@ class ConnectionManager:
         # 获取游戏状态并重置和启动倒计时
         if room_id in self.game_states:
             game_state = self.game_states[room_id]
+            # 如果 max_play_time 为 0，则不启动倒计时
+            if game_state.max_play_time == 0:
+                print(f"[倒计时] 房间 {room_id} 设置为不限制时长，不启动倒计时")
+                game_state.start_countdown()  # 调用后会设置 countdown_active = False
+                return
             game_state.start_countdown()  # 调用GameState的start_countdown方法激活倒计时
             print(f"[倒计时] 房间 {room_id} 的倒计时已激活 - 当前时间: {game_state.current_countdown}秒")
+        else:
+            return
         
         # 创建新的倒计时任务
         task = asyncio.create_task(self._countdown_loop(room_id))
@@ -251,6 +258,11 @@ class ConnectionManager:
                     break
                 
                 game_state = self.game_states[room_id]
+                
+                # 如果 max_play_time 为 0，则不限制时长，退出倒计时循环
+                if game_state.max_play_time == 0:
+                    print(f"[倒计时] 房间 {room_id} 设置为不限制时长，退出倒计时循环")
+                    break
                 
                 # 只在游戏阶段（playing）和有当前玩家时进行倒计时
                 if game_state.game_phase != "playing" or not game_state.current_player:
@@ -481,6 +493,7 @@ class ConnectionManager:
             "my_hand": my_hand,  # 只有自己的手牌
             "countdown": gs.current_countdown,
             "countdown_active": gs.countdown_active,
+            "play_time_limit": gs.room.play_time_limit if gs and gs.room else 18,  # 出牌等待时间限制（0表示不限制）
             "players_cards_count": {
                 p.position.value: len(p.cards) for p in gs.room.players
             },

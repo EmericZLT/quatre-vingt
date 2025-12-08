@@ -11,13 +11,17 @@ import { useGameStore } from '@/stores/game'
 
 const gameStore = useGameStore()
 
-// 计算是否需要闪烁（最后5秒）
+// 计算是否需要闪烁（最后5秒，且不是不限制时长）
 const isBlinking = computed(() => {
-  return gameStore.countdownActive && gameStore.countdown <= 5
+  return gameStore.countdownActive && gameStore.countdown <= 5 && gameStore.play_time_limit > 0
 })
 
-// 计算倒计时时间
+// 计算倒计时时间（如果不限制时长，显示∞）
 const countdown = computed(() => {
+  // 如果 play_time_limit 为 0，表示不限制时长，显示 ∞
+  if (gameStore.play_time_limit === 0) {
+    return '∞'
+  }
   return gameStore.countdown
 })
 </script>

@@ -67,6 +67,17 @@
                 >
                   长 (25秒)
                 </button>
+                <button
+                  @click="playTimeLimit = 0"
+                  :class="[
+                    'px-4 py-2 rounded text-sm transition-colors',
+                    playTimeLimit === 0
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  ]"
+                >
+                  不限制
+                </button>
               </div>
             </div>
             
@@ -407,6 +418,7 @@ function getPlayTimeLimitLabel(timeLimit: number): string {
     case 10: return '短 (10秒)'
     case 18: return '中 (18秒)'
     case 25: return '长 (25秒)'
+    case 0: return '不限制'
     default: return `${timeLimit}秒`
   }
 }

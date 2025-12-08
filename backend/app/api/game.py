@@ -39,8 +39,8 @@ async def create_room(request: CreateRoomRequest) -> GameRoom:
     
     # 验证出牌时间限制
     play_time_limit = request.play_time_limit
-    if play_time_limit not in [10, 18, 25]:
-        raise HTTPException(status_code=400, detail="出牌时间限制必须为10、18或25秒")
+    if play_time_limit not in [0, 10, 18, 25]:
+        raise HTTPException(status_code=400, detail="出牌时间限制必须为0（不限制）、10、18或25秒")
     
     room_id = str(uuid.uuid4())
     room = GameRoom(id=room_id, name=room_name, play_time_limit=play_time_limit)

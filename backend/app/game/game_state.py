@@ -131,7 +131,10 @@ class GameState:
         self.round_summary = None
         
         # 重置倒计时
-        self.current_countdown = self.max_play_time
+        if self.max_play_time > 0:
+            self.current_countdown = self.max_play_time
+        else:
+            self.current_countdown = 0
         self.countdown_active = False
         self.countdown_task = None
         
@@ -673,20 +676,29 @@ class GameState:
     
     def reset_countdown(self):
         """重置倒计时"""
-        self.current_countdown = self.max_play_time
+        if self.max_play_time > 0:
+            self.current_countdown = self.max_play_time
+        else:
+            self.current_countdown = 0
         self.countdown_active = False
     
     def start_countdown(self):
-        """开始倒计时"""
-        self.current_countdown = self.max_play_time
-        self.countdown_active = True
+        """开始倒计时（如果 max_play_time 为 0，则不激活倒计时）"""
+        if self.max_play_time > 0:
+            self.current_countdown = self.max_play_time
+            self.countdown_active = True
+        else:
+            self.current_countdown = 0
+            self.countdown_active = False
     
     def stop_countdown(self):
         """停止倒计时"""
         self.countdown_active = False
     
     def decrease_countdown(self) -> bool:
-        """减少倒计时1秒，返回是否倒计时已结束"""
+        """减少倒计时1秒，返回是否倒计时已结束（如果 max_play_time 为 0，则永远不结束）"""
+        if self.max_play_time == 0:
+            return False  # 不限制时长，永远不结束
         if self.countdown_active and self.current_countdown > 0:
             self.current_countdown -= 1
             return self.current_countdown == 0
