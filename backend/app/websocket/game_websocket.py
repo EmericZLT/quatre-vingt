@@ -343,7 +343,12 @@ class ConnectionManager:
             trick_was_complete = len(game_state.current_trick_with_player) == 4
             
             # 构建卡牌字符串列表（用于前端显示）
-            cards_str = [str(card) for card in result.get("cards", [])]
+            # play_card已经更新了current_trick_with_player，其中的cards已经按手牌顺序排序
+            # 直接从最后一条记录获取即可
+            cards_str = []
+            if hasattr(game_state, "current_trick_with_player") and game_state.current_trick_with_player:
+                last_entry = game_state.current_trick_with_player[-1]
+                cards_str = last_entry.get("cards", [])
             
             # 获取当前轮次最大玩家名称
             current_trick_max_player_name = None

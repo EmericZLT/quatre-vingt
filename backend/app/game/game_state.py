@@ -569,12 +569,29 @@ class GameState:
         if not result.success:
             return {"success": False, "message": result.message, "forced_cards": result.forced_cards}
         
+        # 从玩家手牌中移除出的牌之前，先按照手牌中的顺序重新排序出牌
+        # 这样确保显示顺序与手牌中的顺序一致，而不是玩家选中的顺序
+        # 创建一个 cards 的副本用于标记匹配（处理重复牌的情况）
+        cards_to_match = cards.copy()
+        # 按照手牌中的顺序排序出牌
+        sorted_cards = []
+        for card_in_hand in player.cards:
+            # 如果手牌中的这张牌在要出的牌列表中，且还没被匹配完
+            if card_in_hand in cards_to_match:
+                sorted_cards.append(card_in_hand)
+                # 从待匹配列表中移除（只移除第一个匹配的，处理重复牌）
+                cards_to_match.remove(card_in_hand)
+                # 如果所有牌都已匹配，提前退出
+                if not cards_to_match:
+                    break
+        
         # 从玩家手牌中移除出的牌
         for card in cards:
             player.cards.remove(card)
         
         # 更新current_trick_with_player（支持多张牌）
-        cards_str = [str(card) for card in cards]
+        # 使用按手牌顺序排序后的牌
+        cards_str = [str(card) for card in sorted_cards]
         self.current_trick_with_player.append({
             "player_id": player_id,
             "player_position": player.position.value,

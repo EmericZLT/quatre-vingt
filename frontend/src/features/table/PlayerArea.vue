@@ -198,51 +198,12 @@ const renderCards = computed<string[]>(() => {
   return []
 })
 
-// 对打出的牌进行排序（使用和手牌类似的排序逻辑）
+// 直接使用后端发送的出牌顺序，不进行排序
+// 后端已经保持了玩家选中牌的顺序（从已排序的手牌中按索引选出）
 const sortedPlayedCards = computed<string[]>(() => {
   if (!props.playedCards || props.playedCards.length === 0) return []
-  
-  // 解析卡牌字符串并排序
-  const parsed = props.playedCards.map(card => {
-    const parsed = parseCardString(card)
-    return { card, parsed }
-  }).filter(item => item.parsed !== null)
-  
-  // 简单排序：先按花色，再按点数
-  // 花色优先级：♠ > ♥ > ♣ > ♦
-  const suitPriority: Record<string, number> = { '♠': 4, '♥': 3, '♣': 2, '♦': 1 }
-  const rankPriority: Record<string, number> = {
-    '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
-    '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14,
-    'JOKER-B': 15, 'JOKER-A': 16
-  }
-  
-  parsed.sort((a, b) => {
-    const aParsed = a.parsed!
-    const bParsed = b.parsed!
-    
-    // JOKER最大
-    if (aParsed.rank === 'JOKER-A' || aParsed.rank === 'JOKER-B') {
-      if (bParsed.rank !== 'JOKER-A' && bParsed.rank !== 'JOKER-B') return -1
-      if (aParsed.rank === 'JOKER-A' && bParsed.rank === 'JOKER-B') return -1
-      if (aParsed.rank === 'JOKER-B' && bParsed.rank === 'JOKER-A') return 1
-      return 0
-    }
-    if (bParsed.rank === 'JOKER-A' || bParsed.rank === 'JOKER-B') return 1
-    
-    // 先按花色排序
-    const aSuit = aParsed.suit || ''
-    const bSuit = bParsed.suit || ''
-    const suitDiff = (suitPriority[bSuit] || 0) - (suitPriority[aSuit] || 0)
-    if (suitDiff !== 0) return suitDiff
-    
-    // 再按点数排序（从大到小）
-    const aRank = rankPriority[aParsed.rank] || 0
-    const bRank = rankPriority[bParsed.rank] || 0
-    return bRank - aRank
-  })
-  
-  return parsed.map(item => item.card)
+  // 直接返回，保持后端发送的顺序
+  return props.playedCards
 })
 
 // 获取卡牌图片
