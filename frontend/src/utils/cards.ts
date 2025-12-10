@@ -1,5 +1,5 @@
 // 卡面资源映射工具
-// 实际资源位于 /assets/cards/{Suit}{Rank}.png，例如: SpadeA.png, Heart10.png, JOKER-A.png
+// 实际资源位于 /assets/cards/{Suit}{Rank}.webp，例如: SpadeA.webp, Heart10.webp, JOKER-A.webp
 
 export type Rank = '2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'10'|'J'|'Q'|'K'|'A'|'JOKER-A'|'JOKER-B'
 export type Suit = '♠'|'♥'|'♣'|'♦'|null
@@ -10,8 +10,8 @@ export type Suit = '♠'|'♥'|'♣'|'♦'|null
 export function getCardImage(suit: Suit, rank: Rank): string | null {
   try {
     // 处理JOKER
-    if (rank === 'JOKER-A') return `/assets/cards/JOKER-A.png`
-    if (rank === 'JOKER-B') return `/assets/cards/JOKER-B.png`
+    if (rank === 'JOKER-A') return `/assets/cards/JOKER-A.webp`
+    if (rank === 'JOKER-B') return `/assets/cards/JOKER-B.webp`
     if (!suit) return null
     
     // 花色映射：♠->Spade, ♥->Heart, ♣->Club, ♦->Diamond
@@ -41,7 +41,7 @@ export function getCardImage(suit: Suit, rank: Rank): string | null {
     
     const s = suitMap[suit]
     const r = rankMap[rank] || rank
-    return `/assets/cards/${s}${r}.png`
+    return `/assets/cards/${s}${r}.webp`
   } catch {
     return null
   }

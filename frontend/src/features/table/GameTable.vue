@@ -1323,12 +1323,84 @@ function closeBottomCards() {
   showBottomCards.value = false
 }
 
-// 预加载图片
+// 生成所有54张卡牌的字符串列表（用于预加载）
+function generateAllCardStrings(): string[] {
+  const suits: Array<'♠'|'♥'|'♣'|'♦'> = ['♠', '♥', '♣', '♦']
+  const ranks: Array<'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'10'|'J'|'Q'|'K'|'A'> = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+  const cards: string[] = []
+  
+  // 生成所有普通牌（4个花色 × 13个点数 = 52张）
+  for (const suit of suits) {
+    for (const rank of ranks) {
+      cards.push(`${rank}${suit}`)
+    }
+  }
+  
+  // 添加两张JOKER
+  cards.push('JOKER-A')
+  cards.push('JOKER-B')
+  
+  return cards
+}
+
+// 预加载图片（带重试机制和优先级）
 function preloadCardImages(cardStrings: string[]) {
-  cardStrings.forEach(cardStr => {
-    const img = new Image()
-    img.src = getCardImage(cardStr)
-  })
+  console.log(`[预加载] 开始预加载 ${cardStrings.length} 张卡牌图片`)
+  let loadedCount = 0
+  let errorCount = 0
+  const maxRetries = 3 // 最大重试次数
+  
+  // 加载单张图片（带重试）
+  const loadImage = (cardStr: string, retryCount = 0): Promise<void> => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        loadedCount++
+        resolve()
+        if (loadedCount + errorCount === cardStrings.length) {
+          console.log(`[预加载] 完成！成功: ${loadedCount}, 失败: ${errorCount}`)
+        }
+      }
+      img.onerror = () => {
+        if (retryCount < maxRetries) {
+          // 重试：指数退避（100ms, 200ms, 400ms）
+          const delay = Math.pow(2, retryCount) * 100
+          setTimeout(() => {
+            loadImage(cardStr, retryCount + 1).then(resolve)
+          }, delay)
+        } else {
+          errorCount++
+          console.warn(`[预加载] 图片加载失败（已重试${maxRetries}次）: ${cardStr}`)
+          resolve()
+          if (loadedCount + errorCount === cardStrings.length) {
+            console.log(`[预加载] 完成！成功: ${loadedCount}, 失败: ${errorCount}`)
+          }
+        }
+      }
+      img.src = getCardImage(cardStr)
+    })
+  }
+  
+  // 分批加载，避免浏览器并发限制（每批6张，浏览器通常限制6个并发连接）
+  const batchSize = 6
+  const loadBatch = async (batch: string[]) => {
+    await Promise.all(batch.map(cardStr => loadImage(cardStr)))
+  }
+  
+  // 按批次加载
+  const loadAll = async () => {
+    for (let i = 0; i < cardStrings.length; i += batchSize) {
+      const batch = cardStrings.slice(i, i + batchSize)
+      await loadBatch(batch)
+      // 每批之间稍微延迟，避免浏览器压力过大
+      if (i + batchSize < cardStrings.length) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+    }
+  }
+  
+  // 立即开始加载（不等待）
+  loadAll()
 }
 
 // 打开本局总结的底牌查看
@@ -1366,16 +1438,16 @@ const showRoundSummary = ref(true)
 // 获取卡牌图片
 function getCardImage(cardStr: string): string {
   if (cardStr === '__BACK__') {
-    return '/assets/cards/Background.png'
+    return '/assets/cards/Background.webp'
   }
   const img = getCardImageFromString(cardStr)
-  return img || '/assets/cards/Background.png'
+  return img || '/assets/cards/Background.webp'
 }
 
 // 处理图片加载错误
 function handleImageError(event: Event) {
   const img = event.target as HTMLImageElement
-  img.src = '/assets/cards/Background.png'
+  img.src = '/assets/cards/Background.webp'
 }
 
 
@@ -2518,6 +2590,30 @@ watch(
     }
   }
 )
+
+// 预加载标志，确保只预加载一次
+const cardImagesPreloaded = ref(false)
+
+// 在组件挂载时立即开始预加载（不等待 waiting 阶段）
+// 这样即使玩家刚进入就准备，也能尽可能多地预加载图片
+onMounted(() => {
+  if (!cardImagesPreloaded.value) {
+    console.log('[预加载] 组件挂载，立即开始预加载所有卡牌图片')
+    const allCards = generateAllCardStrings()
+    preloadCardImages(allCards)
+    cardImagesPreloaded.value = true
+  }
+})
+
+// 同时监听 phase 变化，作为备用（如果组件挂载时还没进入 waiting 阶段）
+watch(phase, (newPhase) => {
+  if (newPhase === 'waiting' && !cardImagesPreloaded.value) {
+    console.log('[预加载] 进入 waiting 阶段，开始预加载所有卡牌图片（备用触发）')
+    const allCards = generateAllCardStrings()
+    preloadCardImages(allCards)
+    cardImagesPreloaded.value = true
+  }
+})
 
 // 监听自动出牌类型的变化，更新提示信息
 watch(

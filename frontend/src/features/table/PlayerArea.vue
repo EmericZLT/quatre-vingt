@@ -208,15 +208,15 @@ const sortedPlayedCards = computed<string[]>(() => {
 
 // 获取卡牌图片
 function getCardImage(cardStr: string): string {
-  if (cardStr === '__BACK__') return '/assets/cards/Background.png'
+  if (cardStr === '__BACK__') return '/assets/cards/Background.webp'
   const img = getCardImageFromString(cardStr)
-  return img || '/assets/cards/Background.png' // 默认背景图
+  return img || '/assets/cards/Background.webp' // 默认背景图
 }
 
 // 处理图片加载错误
 function handleImageError(event: Event) {
   const img = event.target as HTMLImageElement
-  img.src = '/assets/cards/Background.png'
+  img.src = '/assets/cards/Background.webp'
 }
 
 // 根据位置获取手牌区域样式类
