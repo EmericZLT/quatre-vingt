@@ -10,12 +10,13 @@ from app.game.card_system import CardSystem
 from app.game.bidding_system import BiddingSystem
 from app.game.card_sorter import CardSorter
 from app.game.card_playing import CardPlayingSystem
+from app.game.leveling import calculate_level_up
 
 
 class GameState:
     """游戏状态管理类"""
     
-    def __init__(self, room: GameRoom):
+    def __init__(self, room: GameRoom, level_up_mode: str = "default"):
         self.room = room
         self.card_system = CardSystem()
         self.bidding_system = BiddingSystem(self.card_system.current_level)
@@ -23,6 +24,8 @@ class GameState:
         # 南北家和东西家独立级别（初始都是2）
         self.north_south_level: int = 2  # 南北家级别
         self.east_west_level: int = 2    # 东西家级别
+        # 升级模式：控制使用哪个升级函数（"default", "standard" 等）
+        self.level_up_mode: str = level_up_mode
         self.dealer_position: PlayerPosition = PlayerPosition.NORTH
         self.current_player: PlayerPosition = PlayerPosition.NORTH
         self.current_trick: List[Card] = []  # 保持向后兼容，但实际使用current_trick_with_player
@@ -1142,13 +1145,6 @@ class GameState:
             dealer_level = self.east_west_level
             idle_level = self.north_south_level
         
-        # 分数抹零（向下取整到10的倍数，仅用于计算升级）
-        # 需求1：特殊处理75分，不抹零为70分，而是直接视为75分（庄家不升级）
-        if final_idle_score == 75:
-            rounded_score = 75
-        else:
-            rounded_score = (final_idle_score // 10) * 10
-        
         # 保存升级前的级别（用于round_summary）
         old_north_south_level = self.north_south_level
         old_east_west_level = self.east_west_level
@@ -1156,21 +1152,16 @@ class GameState:
         # 需求2：检查庄家是否在打A（级牌为14，即A）
         dealer_is_playing_ace = (dealer_level == 14)
         
-        # 计算升级
-        if rounded_score >= 80:
-            # 闲家升级
-            idle_level_up = (rounded_score - 80) // 10
-            idle_level = min(14, idle_level + idle_level_up)
-            dealer_level_up = 0
-        else:
-            # 庄家升级
-            # 需求1：75分时庄家不升级
-            if rounded_score == 75:
-                dealer_level_up = 0
-            else:
-                dealer_level_up = (80 - rounded_score) // 10
-            dealer_level = min(14, dealer_level + dealer_level_up)
-            idle_level_up = 0
+        # 使用升级模块计算升级级数
+        dealer_level_up, idle_level_up, rounded_score = calculate_level_up(
+            final_idle_score=final_idle_score,
+            dealer_level=dealer_level,
+            level_up_mode=self.level_up_mode
+        )
+        
+        # 应用升级（限制最大级别为14）
+        dealer_level = min(14, dealer_level + dealer_level_up)
+        idle_level = min(14, idle_level + idle_level_up)
         
         # 需求2：检查庄家是否胜利（打A且升级）
         dealer_wins = dealer_is_playing_ace and dealer_level_up > 0
