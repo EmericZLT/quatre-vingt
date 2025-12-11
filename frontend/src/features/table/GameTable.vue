@@ -88,86 +88,16 @@
         </div>
 
         <!-- 本局游戏总结弹窗（scoring阶段） -->
-        <div
-          v-if="phase === 'scoring' && game.round_summary && showRoundSummary"
-          class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-amber-500 p-8 min-w-[500px]"
-        >
-          <div class="text-center mb-6">
-            <h2 class="text-2xl font-bold text-amber-300 mb-2">本局游戏总结</h2>
-            <!-- 胜利信息 -->
-            <div v-if="game.round_summary?.dealer_wins" class="mt-4 bg-gradient-to-r from-yellow-600 to-amber-600 rounded-lg p-4 border-2 border-yellow-400">
-              <div class="text-3xl font-bold text-white mb-2">🎉 {{ game.round_summary?.winner_side_name }} 胜利！🎉</div>
-              <div class="text-lg text-yellow-100">游戏将从级牌2重新开始</div>
-            </div>
-          </div>
-          
-          <div class="space-y-4 mb-6">
-            <!-- 闲家得分 -->
-            <div class="flex justify-between items-center">
-              <span class="text-slate-300">闲家得分：</span>
-              <span class="text-lg font-semibold">{{ game.round_summary.idle_score }}分</span>
-            </div>
-            
-            <!-- 扣底信息 -->
-            <div v-if="game.round_summary.bottom_bonus > 0" class="flex justify-between items-center">
-              <span class="text-slate-300">扣底得分：</span>
-              <span class="text-lg font-semibold text-amber-300">
-                +{{ game.round_summary.bottom_bonus }}分
-                <span class="text-sm text-slate-400 ml-2">
-                  (底牌{{ game.round_summary.bottom_score }}分 × {{ game.round_summary.bottom_score > 0 ? (game.round_summary.bottom_bonus / game.round_summary.bottom_score).toFixed(0) : 1 }}倍)
-                </span>
-              </span>
-            </div>
-            
-            <!-- 总得分 -->
-            <div class="flex justify-between items-center border-t border-slate-700 pt-2">
-              <span class="text-lg font-semibold">闲家总得分：</span>
-              <span class="text-2xl font-bold text-amber-300">{{ game.round_summary.total_score }}分</span>
-            </div>
-            
-            <!-- 升级信息 -->
-            <div class="flex flex-col gap-2 border-t border-slate-700 pt-2">
-              <div class="flex justify-between items-center">
-                <span class="text-slate-300">南北家级别：</span>
-                <span class="text-lg font-semibold">
-                  {{ getLevelLabel(game.round_summary.old_north_south_level) }} → {{ getLevelLabel(game.round_summary.new_north_south_level) }}
-                  <span v-if="game.round_summary.dealer_side === 'north_south' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
-                  <span v-if="game.round_summary.idle_side === 'north_south' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
-                </span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-slate-300">东西家级别：</span>
-                <span class="text-lg font-semibold">
-                  {{ getLevelLabel(game.round_summary.old_east_west_level) }} → {{ getLevelLabel(game.round_summary.new_east_west_level) }}
-                  <span v-if="game.round_summary.dealer_side === 'east_west' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
-                  <span v-if="game.round_summary.idle_side === 'east_west' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
-                </span>
-              </div>
-            </div>
-            
-            <!-- 下一轮庄家 -->
-            <div class="flex justify-between items-center border-t border-slate-700 pt-2">
-              <span class="text-slate-300">下一轮庄家：</span>
-              <span class="text-lg font-semibold">{{ game.round_summary.next_dealer_name || getPositionLabel(game.round_summary.next_dealer) }}</span>
-            </div>
-          </div>
-          
-          <!-- 底部按钮 -->
-          <div class="flex gap-2 justify-center border-t border-slate-700 pt-4">
-            <button
-              @click="openRoundSummaryBottomCards"
-              class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold"
-            >
-              查看底牌
-            </button>
-            <button
-              @click="showRoundSummary = false"
-              class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold"
-            >
-              隐藏总结
-            </button>
-          </div>
-        </div>
+        <RoundSummary
+          v-if="phase === 'scoring'"
+          :round-summary="game.round_summary"
+          :show="showRoundSummary && !!game.round_summary"
+          :should-show-ace-count="shouldShowAceCount"
+          :should-show-north-south-ace-count="shouldShowNorthSouthAceCount"
+          :should-show-east-west-ace-count="shouldShowEastWestAceCount"
+          @update:show="showRoundSummary = $event"
+          @open-bottom-cards="openRoundSummaryBottomCards"
+        />
 
         <!-- 准备按钮（在屏幕底部中央） -->
         <!-- scoring阶段的准备按钮 -->
@@ -507,86 +437,16 @@
           </div>
 
           <!-- 本局游戏总结弹窗（scoring阶段） -->
-          <div
-            v-if="phase === 'scoring' && game.round_summary && showRoundSummary"
-            class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-slate-900/95 text-white rounded-lg shadow-2xl border-2 border-amber-500 p-8 min-w-[500px]"
-          >
-            <div class="text-center mb-6">
-              <h2 class="text-2xl font-bold text-amber-300 mb-2">本局游戏总结</h2>
-              <!-- 胜利信息 -->
-              <div v-if="game.round_summary?.dealer_wins" class="mt-4 bg-gradient-to-r from-yellow-600 to-amber-600 rounded-lg p-4 border-2 border-yellow-400">
-                <div class="text-3xl font-bold text-white mb-2">🎉 {{ game.round_summary?.winner_side_name }} 胜利！🎉</div>
-                <div class="text-lg text-yellow-100">游戏将从级牌2重新开始</div>
-              </div>
-            </div>
-            
-            <div class="space-y-4 mb-6">
-              <!-- 闲家得分 -->
-              <div class="flex justify-between items-center">
-                <span class="text-slate-300">闲家得分：</span>
-                <span class="text-lg font-semibold">{{ game.round_summary.idle_score }}分</span>
-              </div>
-              
-              <!-- 扣底信息 -->
-              <div v-if="game.round_summary.bottom_bonus > 0" class="flex justify-between items-center">
-                <span class="text-slate-300">扣底得分：</span>
-                <span class="text-lg font-semibold text-amber-300">
-                  +{{ game.round_summary.bottom_bonus }}分
-                  <span class="text-sm text-slate-400 ml-2">
-                    (底牌{{ game.round_summary.bottom_score }}分 × {{ game.round_summary.bottom_score > 0 ? (game.round_summary.bottom_bonus / game.round_summary.bottom_score).toFixed(0) : 1 }}倍)
-                  </span>
-                </span>
-              </div>
-              
-              <!-- 总得分 -->
-              <div class="flex justify-between items-center border-t border-slate-700 pt-2">
-                <span class="text-lg font-semibold">闲家总得分：</span>
-                <span class="text-2xl font-bold text-amber-300">{{ game.round_summary.total_score }}分</span>
-              </div>
-              
-              <!-- 升级信息 -->
-              <div class="flex flex-col gap-2 border-t border-slate-700 pt-2">
-                <div class="flex justify-between items-center">
-                  <span class="text-slate-300">南北家级别：</span>
-                  <span class="text-lg font-semibold">
-                    {{ getLevelLabel(game.round_summary.old_north_south_level) }} → {{ getLevelLabel(game.round_summary.new_north_south_level) }}
-                    <span v-if="game.round_summary.dealer_side === 'north_south' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
-                    <span v-if="game.round_summary.idle_side === 'north_south' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
-                  </span>
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-slate-300">东西家级别：</span>
-                  <span class="text-lg font-semibold">
-                    {{ getLevelLabel(game.round_summary.old_east_west_level) }} → {{ getLevelLabel(game.round_summary.new_east_west_level) }}
-                    <span v-if="game.round_summary.dealer_side === 'east_west' && game.round_summary.dealer_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.dealer_level_up }}级)</span>
-                    <span v-if="game.round_summary.idle_side === 'east_west' && game.round_summary.idle_level_up > 0" class="text-sm text-slate-400 ml-2">(升{{ game.round_summary.idle_level_up }}级)</span>
-                  </span>
-                </div>
-              </div>
-              
-              <!-- 下一轮庄家 -->
-              <div class="flex justify-between items-center border-t border-slate-700 pt-2">
-                <span class="text-slate-300">下一轮庄家：</span>
-                <span class="text-lg font-semibold">{{ game.round_summary.next_dealer_name || getPositionLabel(game.round_summary.next_dealer) }}</span>
-              </div>
-            </div>
-            
-            <!-- 底部按钮 -->
-            <div class="flex gap-2 justify-center border-t border-slate-700 pt-4">
-              <button
-                @click="openRoundSummaryBottomCards"
-                class="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold"
-              >
-                查看底牌
-              </button>
-              <button
-                @click="showRoundSummary = false"
-                class="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold"
-              >
-                隐藏总结
-              </button>
-            </div>
-          </div>
+          <RoundSummary
+            v-if="phase === 'scoring'"
+            :round-summary="game.round_summary"
+            :show="showRoundSummary && !!game.round_summary"
+            :should-show-ace-count="shouldShowAceCount"
+            :should-show-north-south-ace-count="shouldShowNorthSouthAceCount"
+            :should-show-east-west-ace-count="shouldShowEastWestAceCount"
+            @update:show="showRoundSummary = $event"
+            @open-bottom-cards="openRoundSummaryBottomCards"
+          />
 
           <!-- 准备按钮（在屏幕底部中央） -->
           <!-- scoring阶段的准备按钮 -->
@@ -953,6 +813,7 @@ import { useGameStore } from '@/stores/game'
 import { useRoomStore } from '@/stores/room'
 import PlayerArea from './PlayerArea.vue'
 import CountdownClock from '@/components/CountdownClock.vue'
+import RoundSummary from '@/components/RoundSummary.vue'
 import { getCardImageFromString, parseCardString } from '@/utils/cards'
 import { getWebSocketUrl } from '@/config/env'
 import { useDeviceDetection } from '@/composables/useDeviceDetection'
@@ -1148,6 +1009,32 @@ const {
 // 从路由或store获取房间ID和玩家ID
 const roomId = computed(() => (route.params.roomId as string) || roomStore.roomId || 'demo')
 const playerId = computed(() => roomStore.playerId)
+
+// 打A计数显示逻辑
+const shouldShowAceCount = computed(() => {
+  if (!game.round_summary) return false
+  const summary = game.round_summary
+  // 如果有任一阵营在打A，或者有打A计数，则显示
+  return (summary.dealer_is_playing_ace === true) || 
+         ((summary.north_south_ace_count ?? 0) > 0) || 
+         ((summary.east_west_ace_count ?? 0) > 0)
+})
+
+const shouldShowNorthSouthAceCount = computed(() => {
+  if (!game.round_summary) return false
+  const summary = game.round_summary
+  // 如果南北方本轮在打A，或者南北方有打A计数（大于0），则显示
+  return (summary.dealer_is_playing_ace === true && summary.dealer_side === 'north_south') ||
+         ((summary.north_south_ace_count ?? 0) > 0)
+})
+
+const shouldShowEastWestAceCount = computed(() => {
+  if (!game.round_summary) return false
+  const summary = game.round_summary
+  // 如果东西方本轮在打A，或者东西方有打A计数（大于0），则显示
+  return (summary.dealer_is_playing_ace === true && summary.dealer_side === 'east_west') ||
+         ((summary.east_west_ace_count ?? 0) > 0)
+})
 const myPosition = computed(() => roomStore.playerPosition as Pos)
 const roomName = computed(() => roomStore.roomName)
 const isHost = computed(() => !!roomStore.ownerId && roomStore.ownerId === roomStore.playerId)
@@ -2174,25 +2061,6 @@ function handleLeaveRoom() {
   }
 }
 
-// 获取级别标签
-function getLevelLabel(level: number): string {
-  const levelMap: Record<number, string> = {
-    2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10',
-    11: 'J', 12: 'Q', 13: 'K', 14: 'A'
-  }
-  return levelMap[level] || String(level)
-}
-
-// 获取位置标签
-function getPositionLabel(position: string): string {
-  const positionMap: Record<string, string> = {
-    'NORTH': '北',
-    'SOUTH': '南',
-    'EAST': '东',
-    'WEST': '西'
-  }
-  return positionMap[position.toUpperCase()] || position
-}
 
 // 自动发牌
 function autoDeal() {

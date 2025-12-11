@@ -1166,6 +1166,10 @@ class GameState:
         # 需求2：检查庄家是否胜利（打A且升级）
         dealer_wins = dealer_is_playing_ace and dealer_level_up > 0
         
+        # 需求3：记录打A前的计数（用于前端显示）
+        north_south_ace_count_before = self.north_south_ace_count
+        east_west_ace_count_before = self.east_west_ace_count
+        
         # 需求3：更新打A次数统计
         if dealer_is_playing_ace:
             # 庄家在打A，增加计数
@@ -1247,8 +1251,11 @@ class GameState:
             "winner_side": winner_side,  # 胜利方："north_south" 或 "east_west"，无胜利时为None
             "winner_side_name": winner_side_name,  # 胜利方名称："南北方" 或 "东西方"，无胜利时为None
             "dealer_penalty": dealer_penalty,  # 需求3：庄家是否被惩罚
-            "north_south_ace_count": self.north_south_ace_count,  # 需求3：南北方打A次数
-            "east_west_ace_count": self.east_west_ace_count  # 需求3：东西方打A次数
+            "north_south_ace_count": self.north_south_ace_count,  # 需求3：南北方打A次数（当前）
+            "east_west_ace_count": self.east_west_ace_count,  # 需求3：东西方打A次数（当前）
+            "north_south_ace_count_before": north_south_ace_count_before,  # 需求3：南北方打A次数（本轮前）
+            "east_west_ace_count_before": east_west_ace_count_before,  # 需求3：东西方打A次数（本轮前）
+            "dealer_is_playing_ace": dealer_is_playing_ace  # 需求3：本轮庄家是否在打A
         }
         
         # 进入scoring阶段

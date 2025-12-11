@@ -49,8 +49,11 @@ export const useGameStore = defineStore('game', {
       winner_side?: string | null  // 胜利方："north_south" 或 "east_west"，无胜利时为null
       winner_side_name?: string | null  // 胜利方名称："南北方" 或 "东西方"，无胜利时为null
       dealer_penalty?: boolean  // 庄家是否被惩罚（打A三次未胜利）
-      north_south_ace_count?: number  // 南北方打A次数
-      east_west_ace_count?: number  // 东西方打A次数
+      north_south_ace_count?: number  // 南北方打A次数（当前）
+      east_west_ace_count?: number  // 东西方打A次数（当前）
+      north_south_ace_count_before?: number  // 南北方打A次数（本轮前）
+      east_west_ace_count_before?: number  // 东西方打A次数（本轮前）
+      dealer_is_playing_ace?: boolean  // 本轮庄家是否在打A
     },
     // 准备下一轮的玩家状态
     ready_for_next_round: {
@@ -131,6 +134,7 @@ export const useGameStore = defineStore('game', {
       }
       // 处理本局总结信息
       if (s.round_summary) {
+        console.log('[GameStore] round_summary:', JSON.stringify(s.round_summary, null, 2))
         this.round_summary = s.round_summary
       }
       // 处理准备下一轮的状态
@@ -303,6 +307,7 @@ export const useGameStore = defineStore('game', {
     },
     applyRoundEnd(e: { round_summary?: any; ready_count?: number; total_players?: number; ready_players?: string[] }) {
       if (e.round_summary) {
+        console.log('[GameStore] applyRoundEnd round_summary:', JSON.stringify(e.round_summary, null, 2))
         this.round_summary = e.round_summary
       }
       if (typeof e.ready_count === 'number') {
