@@ -93,6 +93,7 @@ class GameRoom(BaseModel):
     created_at: datetime = datetime.now()
     owner_id: Optional[str] = None
     play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒（中等）
+    level_up_mode: str = "default"  # 升级模式："default"（滁州版）或"standard"（国标版）
     
     @property
     def is_full(self) -> bool:

@@ -124,7 +124,8 @@ class ConnectionManager:
         
         # 如果房间存在但GameState不存在，创建它
         if room_id in rooms and room_id not in self.game_states:
-            self.game_states[room_id] = GameState(rooms[room_id])
+            room = rooms[room_id]
+            self.game_states[room_id] = GameState(room, level_up_mode=room.level_up_mode)
         
         # 连接成功后发送快照给当前玩家
         await self.send_snapshot(room_id, player_id)

@@ -12,6 +12,7 @@ router = APIRouter()
 class CreateRoomRequest(BaseModel):
     name: str
     play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒
+    level_up_mode: str = "default"  # 升级模式："default"（滁州版）或"standard"（国标版）
 
 class JoinRoomRequest(BaseModel):
     player_name: str
@@ -42,8 +43,13 @@ async def create_room(request: CreateRoomRequest) -> GameRoom:
     if play_time_limit not in [0, 10, 18, 25]:
         raise HTTPException(status_code=400, detail="出牌时间限制必须为0（不限制）、10、18或25秒")
     
+    # 验证升级模式
+    level_up_mode = request.level_up_mode
+    if level_up_mode not in ["default", "standard"]:
+        raise HTTPException(status_code=400, detail="升级模式必须为default（滁州版）或standard（国标版）")
+    
     room_id = str(uuid.uuid4())
-    room = GameRoom(id=room_id, name=room_name, play_time_limit=play_time_limit)
+    room = GameRoom(id=room_id, name=room_name, play_time_limit=play_time_limit, level_up_mode=level_up_mode)
     rooms[room_id] = room
     return room
 

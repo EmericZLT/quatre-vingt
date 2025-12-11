@@ -27,67 +27,142 @@
               class="flex-1 px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400"
               @keyup.enter="createRoom"
             />
-          </div>
-          
-          <!-- 房间选项 -->
-          <div class="flex items-center gap-6">
-            <div class="flex items-center gap-3">
-              <label class="text-slate-300 text-sm">出牌等待时间：</label>
-              <div class="flex gap-2">
-                <button
-                  @click="playTimeLimit = 10"
-                  :class="[
-                    'px-4 py-2 rounded text-sm transition-colors',
-                    playTimeLimit === 10
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  ]"
-                >
-                  短 (10秒)
-                </button>
-                <button
-                  @click="playTimeLimit = 18"
-                  :class="[
-                    'px-4 py-2 rounded text-sm transition-colors',
-                    playTimeLimit === 18
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  ]"
-                >
-                  中 (18秒)
-                </button>
-                <button
-                  @click="playTimeLimit = 25"
-                  :class="[
-                    'px-4 py-2 rounded text-sm transition-colors',
-                    playTimeLimit === 25
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  ]"
-                >
-                  长 (25秒)
-                </button>
-                <button
-                  @click="playTimeLimit = 0"
-                  :class="[
-                    'px-4 py-2 rounded text-sm transition-colors',
-                    playTimeLimit === 0
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  ]"
-                >
-                  不限制
-                </button>
-              </div>
-            </div>
-            
             <button
               @click="createRoom"
               :disabled="!newRoomName || !playerName || creating"
-              class="ml-auto px-6 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-600 disabled:cursor-not-allowed"
+              class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-600 disabled:cursor-not-allowed"
             >
               {{ creating ? '创建中...' : '创建房间' }}
             </button>
+          </div>
+          
+          <!-- 房间配置下拉框 -->
+          <div>
+            <button
+              @click="showRoomConfig = !showRoomConfig"
+              class="flex items-center gap-2 text-slate-300 text-sm hover:text-white transition-colors"
+            >
+              <span>房间配置</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 transition-transform"
+                :class="{ 'rotate-180': showRoomConfig }"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div v-show="showRoomConfig" class="mt-3 flex flex-col gap-4">
+              <div class="flex items-center gap-3">
+                <label class="text-slate-300 text-sm">出牌等待时间：</label>
+                <div class="flex gap-2">
+                  <button
+                    @click="playTimeLimit = 10"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      playTimeLimit === 10
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    短 (10秒)
+                  </button>
+                  <button
+                    @click="playTimeLimit = 18"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      playTimeLimit === 18
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    中 (18秒)
+                  </button>
+                  <button
+                    @click="playTimeLimit = 25"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      playTimeLimit === 25
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    长 (25秒)
+                  </button>
+                  <button
+                    @click="playTimeLimit = 0"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      playTimeLimit === 0
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    不限制
+                  </button>
+                </div>
+              </div>
+              
+              <div class="flex items-center gap-3">
+                <label class="text-slate-300 text-sm">升级模式：</label>
+                <div class="flex gap-2 items-center">
+                  <div class="relative group">
+                    <button
+                      @click="levelUpMode = 'default'"
+                      :class="[
+                        'px-4 py-2 rounded text-sm transition-colors flex items-center gap-2',
+                        levelUpMode === 'default'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      ]"
+                    >
+                      滁州版
+                      <div class="relative">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                          <div class="font-semibold mb-1">滁州版规则</div>
+                          <div>• 分数抹零（向下取整到10的倍数）</div>
+                          <div>• 得分≤0：庄家升12级</div>
+                          <div>• 得分≥80：闲家每10分升1级</div>
+                          <div>• 得分＜80：庄家每10分升1级</div>
+                          <div>• 75分特殊处理：庄家连庄但不升级</div>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                  <div class="relative group">
+                    <button
+                      @click="levelUpMode = 'standard'"
+                      :class="[
+                        'px-4 py-2 rounded text-sm transition-colors flex items-center gap-2',
+                        levelUpMode === 'standard'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      ]"
+                    >
+                      国标版
+                      <div class="relative">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                          <div class="font-semibold mb-1">国标版规则</div>
+                          <div>• 分数不抹零（使用原始分数）</div>
+                          <div>• 得分≤0：庄家升3级，每少40分多升1级</div>
+                          <div>• 得分5-35：庄家升2级</div>
+                          <div>• 得分40-75：庄家升1级</div>
+                          <div>• 得分≥80：闲家每多40分升1级</div>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -180,6 +255,8 @@ const roomStore = useRoomStore()
 const newRoomName = ref('')
 const playerName = ref('')
 const playTimeLimit = ref(18)  // 默认18秒（中等）
+const levelUpMode = ref('default')  // 升级模式：'default'（滁州版）或'standard'（国标版）
+const showRoomConfig = ref(false)  // 房间配置下拉框是否展开
 const creating = ref(false)
 const loading = ref(true)
 const joinPlayerNames = ref<Record<string, string>>({})
@@ -323,7 +400,8 @@ async function createRoom() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         name: roomName,
-        play_time_limit: playTimeLimit.value
+        play_time_limit: playTimeLimit.value,
+        level_up_mode: levelUpMode.value
       })
     })
     
