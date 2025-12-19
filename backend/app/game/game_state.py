@@ -16,7 +16,7 @@ from app.game.leveling import calculate_level_up
 class GameState:
     """游戏状态管理类"""
     
-    def __init__(self, room: GameRoom, level_up_mode: str = "default"):
+    def __init__(self, room: GameRoom, level_up_mode: str = "default", ace_reset_enabled: bool = True):
         self.room = room
         self.card_system = CardSystem()
         self.bidding_system = BiddingSystem(self.card_system.current_level)
@@ -26,6 +26,8 @@ class GameState:
         self.east_west_level: int = 2    # 东西家级别
         # 升级模式：控制使用哪个升级函数（"default", "standard" 等）
         self.level_up_mode: str = level_up_mode
+        # 打A重置：连续3次打A不过是否重置级别
+        self.ace_reset_enabled: bool = ace_reset_enabled
         self.dealer_position: PlayerPosition = PlayerPosition.NORTH
         self.current_player: PlayerPosition = PlayerPosition.NORTH
         self.current_trick: List[Card] = []  # 保持向后兼容，但实际使用current_trick_with_player
@@ -1170,35 +1172,36 @@ class GameState:
         north_south_ace_count_before = self.north_south_ace_count
         east_west_ace_count_before = self.east_west_ace_count
         
-        # 需求3：更新打A次数统计
-        if dealer_is_playing_ace:
-            # 庄家在打A，增加计数
-            if dealer_side == "north_south":
-                self.north_south_ace_count += 1
-            else:
-                self.east_west_ace_count += 1
-        
-        # 需求3：检查是否需要惩罚（打A三次仍未胜利）
+        # 需求3：更新打A次数统计（仅在ace_reset_enabled时生效）
         dealer_penalty = False
-        if dealer_is_playing_ace and not dealer_wins:
-            # 打A但未胜利，检查是否达到3次
-            ace_count = self.north_south_ace_count if dealer_side == "north_south" else self.east_west_ace_count
-            if ace_count >= 3:
-                # 达到3次，重置级别为2
-                dealer_level = 2
-                dealer_penalty = True
-                # 清零计数
+        if self.ace_reset_enabled:
+            if dealer_is_playing_ace:
+                # 庄家在打A，增加计数
+                if dealer_side == "north_south":
+                    self.north_south_ace_count += 1
+                else:
+                    self.east_west_ace_count += 1
+            
+            # 需求3：检查是否需要惩罚（打A三次仍未胜利）
+            if dealer_is_playing_ace and not dealer_wins:
+                # 打A但未胜利，检查是否达到3次
+                ace_count = self.north_south_ace_count if dealer_side == "north_south" else self.east_west_ace_count
+                if ace_count >= 3:
+                    # 达到3次，重置级别为2
+                    dealer_level = 2
+                    dealer_penalty = True
+                    # 清零计数
+                    if dealer_side == "north_south":
+                        self.north_south_ace_count = 0
+                    else:
+                        self.east_west_ace_count = 0
+            
+            # 需求2：如果庄家胜利，清零打A计数（因为已经胜利）
+            if dealer_wins:
                 if dealer_side == "north_south":
                     self.north_south_ace_count = 0
                 else:
                     self.east_west_ace_count = 0
-        
-        # 需求2：如果庄家胜利，清零打A计数（因为已经胜利）
-        if dealer_wins:
-            if dealer_side == "north_south":
-                self.north_south_ace_count = 0
-            else:
-                self.east_west_ace_count = 0
         
         # 更新级别（根据位置）
         if dealer_side == "north_south":

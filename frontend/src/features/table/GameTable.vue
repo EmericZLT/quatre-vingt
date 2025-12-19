@@ -1012,6 +1012,8 @@ const playerId = computed(() => roomStore.playerId)
 
 // 打A计数显示逻辑
 const shouldShowAceCount = computed(() => {
+  // 如果打A重置功能未启用，不显示打A计数
+  if (!game.ace_reset_enabled) return false
   if (!game.round_summary) return false
   const summary = game.round_summary
   // 如果有任一阵营在打A，或者有打A计数，则显示

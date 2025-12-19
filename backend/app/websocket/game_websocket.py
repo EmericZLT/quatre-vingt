@@ -125,7 +125,11 @@ class ConnectionManager:
         # 如果房间存在但GameState不存在，创建它
         if room_id in rooms and room_id not in self.game_states:
             room = rooms[room_id]
-            self.game_states[room_id] = GameState(room, level_up_mode=room.level_up_mode)
+            self.game_states[room_id] = GameState(
+                room,
+                level_up_mode=room.level_up_mode,
+                ace_reset_enabled=room.ace_reset_enabled
+            )
         
         # 连接成功后发送快照给当前玩家
         await self.send_snapshot(room_id, player_id)
@@ -500,6 +504,7 @@ class ConnectionManager:
             "countdown": gs.current_countdown,
             "countdown_active": gs.countdown_active,
             "play_time_limit": gs.room.play_time_limit if gs and gs.room else 18,  # 出牌等待时间限制（0表示不限制）
+            "ace_reset_enabled": gs.ace_reset_enabled if gs else True,  # 打A重置是否启用
             "players_cards_count": {
                 p.position.value: len(p.cards) for p in gs.room.players
             },

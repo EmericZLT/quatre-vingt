@@ -162,6 +162,44 @@
                   </div>
                 </div>
               </div>
+              
+              <div class="flex items-center gap-3">
+                <label class="text-slate-300 text-sm">打A不过重置：</label>
+                <div class="flex gap-2 items-center">
+                  <button
+                    @click="aceResetEnabled = true"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      aceResetEnabled
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    是
+                  </button>
+                  <button
+                    @click="aceResetEnabled = false"
+                    :class="[
+                      'px-4 py-2 rounded text-sm transition-colors',
+                      !aceResetEnabled
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ]"
+                  >
+                    否
+                  </button>
+                  <div class="relative group">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-56 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                      <div class="font-semibold mb-1">打A不过重置规则</div>
+                      <div>• 是：连续3次打A不过，级别重置为2</div>
+                      <div>• 否：打A不过不影响级别</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -256,6 +294,7 @@ const newRoomName = ref('')
 const playerName = ref('')
 const playTimeLimit = ref(18)  // 默认18秒（中等）
 const levelUpMode = ref('default')  // 升级模式：'default'（滁州版）或'standard'（国标版）
+const aceResetEnabled = ref(true)  // 打A不过重置：连续3次打A不过是否重置级别
 const showRoomConfig = ref(false)  // 房间配置下拉框是否展开
 const creating = ref(false)
 const loading = ref(true)
@@ -401,7 +440,8 @@ async function createRoom() {
       body: JSON.stringify({ 
         name: roomName,
         play_time_limit: playTimeLimit.value,
-        level_up_mode: levelUpMode.value
+        level_up_mode: levelUpMode.value,
+        ace_reset_enabled: aceResetEnabled.value
       })
     })
     

@@ -13,6 +13,7 @@ class CreateRoomRequest(BaseModel):
     name: str
     play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒
     level_up_mode: str = "default"  # 升级模式："default"（滁州版）或"standard"（国标版）
+    ace_reset_enabled: bool = True  # 连续3次打A不过是否重置级别，默认开启
 
 class JoinRoomRequest(BaseModel):
     player_name: str
@@ -49,7 +50,13 @@ async def create_room(request: CreateRoomRequest) -> GameRoom:
         raise HTTPException(status_code=400, detail="升级模式必须为default（滁州版）或standard（国标版）")
     
     room_id = str(uuid.uuid4())
-    room = GameRoom(id=room_id, name=room_name, play_time_limit=play_time_limit, level_up_mode=level_up_mode)
+    room = GameRoom(
+        id=room_id,
+        name=room_name,
+        play_time_limit=play_time_limit,
+        level_up_mode=level_up_mode,
+        ace_reset_enabled=request.ace_reset_enabled
+    )
     rooms[room_id] = room
     return room
 

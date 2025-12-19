@@ -94,6 +94,7 @@ class GameRoom(BaseModel):
     owner_id: Optional[str] = None
     play_time_limit: int = 18  # 出牌等待时间（秒），默认18秒（中等）
     level_up_mode: str = "default"  # 升级模式："default"（滁州版）或"standard"（国标版）
+    ace_reset_enabled: bool = True  # 连续3次打A不过是否重置级别，默认开启
     
     @property
     def is_full(self) -> bool:

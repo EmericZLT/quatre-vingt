@@ -25,6 +25,7 @@ export const useGameStore = defineStore('game', {
     countdown: 24,  // 当前倒计时秒数
     countdownActive: false,  // 倒计时是否激活
     play_time_limit: 18,  // 出牌等待时间限制（0表示不限制）
+    ace_reset_enabled: true,  // 打A不过重置功能是否启用
     // 仅用于演示：每家展示用的"手里标签"列表（真实游戏中只对本家给出具体牌）
     demoHands: { NORTH: [] as string[], WEST: [] as string[], SOUTH: [] as string[], EAST: [] as string[] } as Record<Pos, string[]>,
     // 本局游戏总结信息
@@ -128,6 +129,9 @@ export const useGameStore = defineStore('game', {
       }
       if (typeof s.play_time_limit === 'number') {
         this.play_time_limit = s.play_time_limit
+      }
+      if (typeof s.ace_reset_enabled === 'boolean') {
+        this.ace_reset_enabled = s.ace_reset_enabled
       }
       if (Array.isArray(s.my_hand_sorted)) {
         // 前端需知道自己位置；此处略过，仅占位
