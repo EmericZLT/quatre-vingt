@@ -10,6 +10,8 @@
               欢迎, <span class="text-blue-400 font-semibold">{{ authStore.username }}</span>
               <span v-if="authStore.isAdmin" class="ml-1 text-xs bg-amber-600 text-white px-1 rounded">管理员</span>
             </span>
+            <button v-if="authStore.isAdmin" @click="showAdminModal = true" class="text-sm text-amber-400 hover:text-amber-300">管理</button>
+            <span v-if="authStore.isAdmin" class="text-slate-600">|</span>
             <button @click="authStore.logout()" class="text-sm text-red-400 hover:text-red-300">退出登录</button>
           </template>
           <template v-else>
@@ -349,6 +351,57 @@
         </div>
       </div>
     </div>
+
+    <!-- 管理员弹窗 -->
+    <div v-if="showAdminModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="bg-slate-800 p-8 rounded-lg shadow-2xl w-full max-md border border-slate-700" style="max-width: 450px;">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold text-white">系统管理</h2>
+          <button @click="showAdminModal = false" class="text-slate-400 hover:text-white">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <div class="space-y-6">
+          <!-- 数据清理 -->
+          <div class="p-4 bg-slate-700/50 rounded-lg border border-slate-600">
+            <h3 class="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              用户数据清理
+            </h3>
+            <p class="text-sm text-slate-400 mb-4">
+              该操作将永久删除指定天数内未登录的非管理员用户及其战绩数据。
+            </p>
+            <div class="flex items-center gap-4">
+              <div class="flex-1">
+                <label class="block text-xs text-slate-500 mb-1">未登录天数</label>
+                <input
+                  v-model.number="cleanupDays"
+                  type="number"
+                  min="1"
+                  class="w-full px-3 py-2 rounded bg-slate-800 text-white border border-slate-600 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+              <button
+                @click="handleCleanup"
+                :disabled="adminLoading"
+                class="mt-5 px-6 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:bg-slate-600"
+              >
+                {{ adminLoading ? '执行中...' : '立即执行' }}
+              </button>
+            </div>
+          </div>
+          
+          <div v-if="adminMessage" :class="['p-3 rounded text-sm', adminMessage.type === 'success' ? 'bg-green-900/50 text-green-400 border border-green-700' : 'bg-red-900/50 text-red-400 border border-red-700']">
+            {{ adminMessage.text }}
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -382,6 +435,12 @@ const showAuthModal = ref<'login' | 'register' | null>(null)
 const authLoading = ref(false)
 const authError = ref('')
 const authForm = ref({ username: '', password: '' })
+
+// 管理相关
+const showAdminModal = ref(false)
+const adminLoading = ref(false)
+const cleanupDays = ref(30)
+const adminMessage = ref<{text: string, type: 'success' | 'error'} | null>(null)
 
 // 监听登录状态变化，自动填充 playerName
 watch(() => authStore.username, (newVal) => {
@@ -429,6 +488,30 @@ async function authenticatedFetch(url: string, options: RequestInit = {}) {
   }
 
   return fetch(url, { ...options, headers })
+}
+
+// 处理清理逻辑
+async function handleCleanup() {
+  if (!confirm(`确定要清理 ${cleanupDays.value} 天内未登录的用户吗？此操作不可逆！`)) return
+  
+  adminLoading.value = true
+  adminMessage.value = null
+  
+  try {
+    const response = await authenticatedFetch(getApiUrl(`/api/auth/cleanup?days=${cleanupDays.value}`), {
+      method: 'DELETE'
+    })
+    const data = await response.json()
+    if (response.ok) {
+      adminMessage.value = { text: data.message, type: 'success' }
+    } else {
+      adminMessage.value = { text: data.detail || '清理失败', type: 'error' }
+    }
+  } catch (err) {
+    adminMessage.value = { text: '网络错误', type: 'error' }
+  } finally {
+    adminLoading.value = false
+  }
 }
 
 // 保存当前聚焦的输入框信息
@@ -628,7 +711,7 @@ function isAnyInputFocused(): boolean {
 }
 
 function smartRefresh() {
-  if (!isAnyInputFocused() && !showAuthModal.value) {
+  if (!isAnyInputFocused() && !showAuthModal.value && !showAdminModal.value) {
     loadRooms()
   }
 }
