@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import router as api_router
 from app.websocket import router as websocket_router
+from app.db.database import init_db
 
 # Create FastAPI app
 app = FastAPI(
@@ -13,6 +14,11 @@ app = FastAPI(
     version=settings.app_version,
     description="八十分在线纸牌游戏后端API"
 )
+
+@app.on_event("startup")
+async def startup_event():
+    # 初始化数据库
+    await init_db()
 
 # Add CORS middleware
 app.add_middleware(

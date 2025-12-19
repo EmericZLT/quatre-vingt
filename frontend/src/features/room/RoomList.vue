@@ -1,7 +1,24 @@
 <template>
   <div class="room-list-container min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-8">
     <div class="max-w-4xl mx-auto">
-      <h1 class="text-3xl font-bold text-white mb-8 text-center">游戏大厅</h1>
+      <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold text-white">游戏大厅</h1>
+        <!-- 用户信息/登录入口 -->
+        <div class="flex items-center gap-4">
+          <template v-if="authStore.isLoggedIn">
+            <span class="text-slate-300">
+              欢迎, <span class="text-blue-400 font-semibold">{{ authStore.username }}</span>
+              <span v-if="authStore.isAdmin" class="ml-1 text-xs bg-amber-600 text-white px-1 rounded">管理员</span>
+            </span>
+            <button @click="authStore.logout()" class="text-sm text-red-400 hover:text-red-300">退出登录</button>
+          </template>
+          <template v-else>
+            <button @click="showAuthModal = 'login'" class="text-sm text-blue-400 hover:text-blue-300">登录</button>
+            <span class="text-slate-600">|</span>
+            <button @click="showAuthModal = 'register'" class="text-sm text-blue-400 hover:text-blue-300">注册</button>
+          </template>
+        </div>
+      </div>
       
       <!-- 创建房间区域 -->
       <div class="bg-slate-800 rounded-lg p-6 mb-6">
@@ -278,20 +295,76 @@
         </div>
       </div>
     </div>
+
+    <!-- 认证弹窗 -->
+    <div v-if="showAuthModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="bg-slate-800 p-8 rounded-lg shadow-2xl w-full max-md border border-slate-700" style="max-width: 400px;">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold text-white">{{ showAuthModal === 'login' ? '登录' : '注册' }}</h2>
+          <button @click="showAuthModal = null" class="text-slate-400 hover:text-white">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        
+        <form @submit.prevent="handleAuth" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">用户名</label>
+            <input
+              v-model="authForm.username"
+              type="text"
+              required
+              class="w-full px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400 border border-slate-600 focus:border-blue-500 focus:outline-none"
+              placeholder="2-15位字符"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">密码</label>
+            <input
+              v-model="authForm.password"
+              type="password"
+              required
+              class="w-full px-4 py-2 rounded bg-slate-700 text-white placeholder-slate-400 border border-slate-600 focus:border-blue-500 focus:outline-none"
+              placeholder="至少6位"
+            />
+          </div>
+          <div v-if="authError" class="text-red-400 text-sm">{{ authError }}</div>
+          <button
+            type="submit"
+            :disabled="authLoading"
+            class="w-full py-3 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold transition-colors disabled:bg-slate-600"
+          >
+            {{ authLoading ? '处理中...' : (showAuthModal === 'login' ? '立即登录' : '注册账号') }}
+          </button>
+        </form>
+        
+        <div class="mt-4 text-center">
+          <button
+            @click="showAuthModal = showAuthModal === 'login' ? 'register' : 'login'"
+            class="text-sm text-slate-400 hover:text-blue-400"
+          >
+            {{ showAuthModal === 'login' ? '没有账号？立即注册' : '已有账号？立即登录' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoomStore } from '@/stores/room'
+import { useAuthStore } from '@/stores/auth'
 import { getApiUrl } from '@/config/env'
 
 const router = useRouter()
 const roomStore = useRoomStore()
+const authStore = useAuthStore()
 
 const newRoomName = ref('')
-const playerName = ref('')
+const playerName = ref(authStore.username || '') // 默认使用已登录用户名
 const playTimeLimit = ref(18)  // 默认18秒（中等）
 const levelUpMode = ref('default')  // 升级模式：'default'（滁州版）或'standard'（国标版）
 const aceResetEnabled = ref(true)  // 打A不过重置：连续3次打A不过是否重置级别
@@ -304,6 +377,60 @@ const joining = ref<Record<string, boolean>>({})
 const rooms = ref<any[]>([])
 const canResume = ref(false)
 
+// 认证相关
+const showAuthModal = ref<'login' | 'register' | null>(null)
+const authLoading = ref(false)
+const authError = ref('')
+const authForm = ref({ username: '', password: '' })
+
+// 监听登录状态变化，自动填充 playerName
+watch(() => authStore.username, (newVal) => {
+  if (newVal) playerName.value = newVal
+})
+
+// 处理认证逻辑
+async function handleAuth() {
+  authLoading.value = true
+  authError.value = ''
+  const endpoint = showAuthModal.value === 'login' ? '/api/auth/login' : '/api/auth/register'
+  
+  try {
+    const response = await fetch(getApiUrl(endpoint), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(authForm.value)
+    })
+    
+    const data = await response.json()
+    if (response.ok) {
+      authStore.setAuth(data.access_token, data.username, data.is_admin)
+      playerName.value = data.username
+      showAuthModal.value = null
+      authForm.value = { username: '', password: '' }
+    } else {
+      authError.value = data.detail || '操作失败'
+    }
+  } catch (err) {
+    authError.value = '网络错误，请稍后再试'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+// 统一带 Token 的 fetch 封装
+async function authenticatedFetch(url: string, options: RequestInit = {}) {
+  const headers = {
+    ...(options.headers || {}),
+    'Content-Type': 'application/json',
+  } as Record<string, string>
+
+  if (authStore.token) {
+    headers['Authorization'] = `Bearer ${authStore.token}`
+  }
+
+  return fetch(url, { ...options, headers })
+}
+
 // 保存当前聚焦的输入框信息
 let focusedInputInfo: {
   type: 'playerName' | 'newRoomName' | 'joinRoom'
@@ -312,9 +439,8 @@ let focusedInputInfo: {
   selectionEnd: number | null
 } | null = null
 
-// 加载房间列表
+// 加载房间列表 (保留你的焦点恢复逻辑)
 async function loadRooms() {
-  // 保存当前聚焦的输入框信息（仅在手动刷新时保留，自动刷新时如果输入框聚焦则跳过）
   const activeElement = document.activeElement
   if (activeElement && activeElement.tagName === 'INPUT') {
     const input = activeElement as HTMLInputElement
@@ -323,7 +449,7 @@ async function loadRooms() {
     
     if (dataInputType === 'playerName' || dataInputType === 'newRoomName') {
       focusedInputInfo = {
-        type: dataInputType,
+        type: dataInputType as any,
         selectionStart: input.selectionStart,
         selectionEnd: input.selectionEnd
       }
@@ -344,14 +470,9 @@ async function loadRooms() {
   try {
     loading.value = true
     const apiUrl = getApiUrl('/api/rooms')
-    console.log('加载房间列表，请求 URL:', apiUrl)
     const response = await fetch(apiUrl)
-    console.log('响应状态:', response.status)
     if (response.ok) {
       rooms.value = await response.json()
-      console.log('房间列表加载成功，房间数:', rooms.value.length)
-    } else {
-      console.error('加载房间列表失败:', response.status, response.statusText)
     }
   } catch (error) {
     console.error('加载房间列表异常:', error)
@@ -359,7 +480,6 @@ async function loadRooms() {
     loading.value = false
   }
 
-  // 恢复焦点（仅在之前有焦点时恢复）
   await nextTick()
   if (focusedInputInfo) {
     let inputToFocus: HTMLInputElement | null = null
@@ -380,13 +500,12 @@ async function loadRooms() {
   }
 }
 
-// 恢复对局
+// 恢复对局 (使用 authenticatedFetch)
 async function resumeRoom() {
   if (!roomStore.roomId || !roomStore.token) return
   try {
-    const response = await fetch(getApiUrl(`/api/rooms/${roomStore.roomId}/reconnect`), {
+    const response = await authenticatedFetch(getApiUrl(`/api/rooms/${roomStore.roomId}/reconnect`), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: roomStore.token })
     })
     if (response.ok) {
@@ -398,8 +517,6 @@ async function resumeRoom() {
         return
       }
     }
-    // 如果失败，清理上下文
-    console.warn('[Resume] token invalid, clearing context')
     roomStore.clearRoom()
     canResume.value = false
   } catch (e) {
@@ -407,9 +524,8 @@ async function resumeRoom() {
   }
 }
 
-// 创建房间
+// 创建房间 (保留你的验证和 log 逻辑)
 async function createRoom() {
-  // 前端验证
   const roomName = newRoomName.value.trim()
   const name = playerName.value.trim()
   
@@ -432,11 +548,9 @@ async function createRoom() {
     creating.value = true
     const apiUrl = getApiUrl('/api/rooms')
     console.log('创建房间，请求 URL:', apiUrl)
-    console.log('请求数据:', { name: roomName })
     
-    const response = await fetch(apiUrl, {
+    const response = await authenticatedFetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         name: roomName,
         play_time_limit: playTimeLimit.value,
@@ -445,16 +559,11 @@ async function createRoom() {
       })
     })
     
-    console.log('响应状态:', response.status, response.statusText)
-    
     if (response.ok) {
       const room = await response.json()
-      console.log('房间创建成功:', room)
-      // 加入房间
       await joinRoom(room.id, name)
     } else {
       const errorData = await response.json().catch(() => ({ detail: response.statusText }))
-      console.error('创建房间失败，响应:', errorData)
       alert(`创建房间失败: ${errorData.detail || response.statusText}`)
     }
   } catch (error) {
@@ -465,15 +574,14 @@ async function createRoom() {
   }
 }
 
-// 加入房间
+// 加入房间 (保留你的验证逻辑)
 async function joinRoom(roomId: string, name?: string) {
-  const playerNameToUse = (name || joinPlayerNames.value[roomId])?.trim()
+  const playerNameToUse = (name || joinPlayerNames.value[roomId] || playerName.value || '').trim()
   if (!playerNameToUse) {
     alert('请输入玩家名')
     return
   }
   
-  // 前端验证
   if (playerNameToUse.length > 8) {
     alert('玩家名不能超过8个字符')
     return
@@ -481,21 +589,20 @@ async function joinRoom(roomId: string, name?: string) {
   
   try {
     joining.value[roomId] = true
-    const response = await fetch(getApiUrl(`/api/rooms/${roomId}/join`), {
+    const response = await authenticatedFetch(getApiUrl(`/api/rooms/${roomId}/join`), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ player_name: playerNameToUse })
     })
     
     if (response.ok) {
       const room = await response.json()
-      // 找到刚加入的玩家
-      const player = room.players.find((p: any) => p.name === playerNameToUse)
+      // 识别玩家（如果是登录状态，优先匹配用户名）
+      const player = room.players.find((p: any) => 
+        (authStore.isLoggedIn && p.name === authStore.username) || p.name === playerNameToUse
+      )
       if (player) {
-        // 保存房间和玩家信息（含token）
         roomStore.setRoom(room.id, player.id, player.name, player.position, room.owner_id, room.name, player.token)
-        // 跳转到游戏界面
-        router.push(`/game/${room.id}`)
+        router.push(`/game/${roomId}`)
       }
     } else {
       const errorData = await response.json().catch(() => ({ detail: response.statusText }))
@@ -503,34 +610,29 @@ async function joinRoom(roomId: string, name?: string) {
     }
   } catch (error) {
     console.error('Failed to join room:', error)
-    alert('加入房间失败')
+    alert('网络错误，加入房间失败')
   } finally {
     joining.value[roomId] = false
   }
 }
 
-// 定期刷新房间列表（只在没有输入框聚焦时刷新）
+// 智能刷新
 let refreshInterval: number | null = null
 
-// 检查是否有输入框正在聚焦
 function isAnyInputFocused(): boolean {
   const activeElement = document.activeElement
-  if (!activeElement || activeElement.tagName !== 'INPUT') {
-    return false
-  }
+  if (!activeElement || activeElement.tagName !== 'INPUT') return false
   const input = activeElement as HTMLInputElement
   return input.getAttribute('data-input-type') !== null || 
          input.getAttribute('data-room-id') !== null
 }
 
-// 智能刷新：只在没有输入框聚焦时才刷新
 function smartRefresh() {
-  if (!isAnyInputFocused()) {
+  if (!isAnyInputFocused() && !showAuthModal.value) {
     loadRooms()
   }
 }
 
-// 获取出牌时间限制的显示标签
 function getPlayTimeLimitLabel(timeLimit: number): string {
   switch(timeLimit) {
     case 10: return '短 (10秒)'
@@ -542,20 +644,19 @@ function getPlayTimeLimitLabel(timeLimit: number): string {
 }
 
 onMounted(() => {
-  // 尝试从本地恢复上下文
   roomStore.loadFromStorage()
   canResume.value = !!roomStore.roomId && !!roomStore.token
   loadRooms()
-  // 每10秒智能刷新一次房间列表（只在没有输入框聚焦时）
   refreshInterval = window.setInterval(smartRefresh, 10000)
 })
 
-// 清理定时器
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  if (refreshInterval) clearInterval(refreshInterval)
 })
 </script>
 
+<style scoped>
+.room-list-container {
+  background-attachment: fixed;
+}
+</style>

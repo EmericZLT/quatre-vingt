@@ -10,6 +10,7 @@ from app.game.game_state import GameState
 from app.game.card_sorter import CardSorter
 from app.api.game import rooms
 from app.models.game import Card, Rank, Suit, GameRoom, Player, PlayerPosition
+from app.services.stats_service import record_game_stats
 
 router = APIRouter()
 
@@ -406,6 +407,11 @@ class ConnectionManager:
             
             # 检查游戏是否结束
             if game_state.game_phase == "scoring" and game_state.round_summary:
+                # 记录战绩（仅记录一次）
+                if not game_state.stats_recorded:
+                    asyncio.create_task(record_game_stats(game_state.round_summary, game_state.room.players))
+                    game_state.stats_recorded = True
+                
                 round_end_event = {
                     "type": "round_end",
                     "round_summary": game_state.round_summary,
@@ -1039,6 +1045,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str 
                                     # 检查游戏是否结束（所有玩家手牌为空）
                                     # 注意：_handle_game_end会在play_card中调用，所以这里检查phase是否为scoring
                                     if gs.game_phase == "scoring" and gs.round_summary:
+                                        # 记录战绩（仅记录一次）
+                                        if not gs.stats_recorded:
+                                            asyncio.create_task(record_game_stats(gs.round_summary, gs.room.players))
+                                            gs.stats_recorded = True
+                                        
                                         # 游戏结束，发送round_end事件
                                         round_end_event = {
                                             "type": "round_end",

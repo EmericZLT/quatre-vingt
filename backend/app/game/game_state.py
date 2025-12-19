@@ -93,6 +93,7 @@ class GameState:
         # 打A次数统计（用于惩罚连续打A但未胜利的一方）
         self.north_south_ace_count: int = 0  # 南北方坐庄且级牌为A的次数
         self.east_west_ace_count: int = 0    # 东西方坐庄且级牌为A的次数
+        self.stats_recorded: bool = False   # 是否已记录本局战绩
     
     def _reset_round_state(self):
         """
@@ -134,6 +135,7 @@ class GameState:
         
         # 总结信息（新一轮开始时清空）
         self.round_summary = None
+        self.stats_recorded = False
         
         # 重置倒计时
         if self.max_play_time > 0:
